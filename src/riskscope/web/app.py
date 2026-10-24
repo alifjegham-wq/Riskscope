@@ -25,6 +25,17 @@ from ..appscan.osv import OsvClient, VulnSource
 from ..checks import Check, ScanContext, default_checks
 from ..checks.base import DnsLookup, ExistsLookup, system_dns, system_exists
 from ..config import Settings
+from ..ipscan import (
+    CertProbe,
+    DiscoveredSite,
+    Discovery,
+    PassiveDnsSource,
+    cert_hostnames,
+    discover_sites,
+    looks_like_ip_target,
+    parse_ip_target,
+    passive_source,
+)
 from ..models import Report, Severity
 from ..monitoring import Scheduler, confirm_email
 from ..notify import Email, LogMailer, Mailer, SmtpMailer
@@ -58,6 +69,12 @@ _PRIVATE_PREFIXES = ("/r/", "/m/", "/api/reports/")
 _EMAIL = re.compile(r"^[^@\s]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}$")
 
 
+@dataclass
+class IpScanResult:
+    discovery: Discovery
+    scanned: list[tuple[DiscoveredSite, Report]]
+
+
 class VerificationCtx(TypedDict):
     target: Target
     token: str
@@ -77,6 +94,8 @@ class Services:
     limiter: RateLimiter
     store: Store
     mailer: Mailer
+    passive: PassiveDnsSource
+    cert_probe: CertProbe = cert_hostnames
     #: Monitoring needs working email. On a public server without SMTP the sign-up is hidden, because
     #: confirmation emails would only reach the server log. Locally the log is how you follow the links.
     monitoring_enabled: bool = True
@@ -97,6 +116,23 @@ class Services:
         verified = want_active and await is_verified(target, self.settings.verify_secret, self.dns, fetcher)
         ctx = ScanContext(target=target, fetcher=fetcher, dns=self.dns, exists=self.exists, verified_owner=verified)
         return await scan_website(ctx, self.checks)
+
+    async def ip_scan(self, raw: str) -> IpScanResult:
+        """Find the site(s) hosted on an IP or CIDR block and scan each (passive checks only)."""
+        target = parse_ip_target(raw, self.settings.max_cidr_hosts)
+        discovery = await discover_sites(
+            target,
+            dns=self.dns,
+            resolver=self.resolver,
+            passive=self.passive,
+            cert_probe=self.cert_probe,
+            max_sites=self.settings.max_ip_sites,
+        )
+        scanned: list[tuple[DiscoveredSite, Report]] = []
+        for site in discovery.sites:
+            report = await self.scan(parse_target(site.host), False)
+            scanned.append((site, report))
+        return IpScanResult(discovery=discovery, scanned=scanned)
 
     async def share(self, report: Report) -> Report:
         ttl = self.settings.share_ttl_days * 86_400
@@ -129,6 +165,8 @@ def create_app(
     exists: ExistsLookup = system_exists,
     checks: list[Check] | None = None,
     mailer: Mailer | None = None,
+    passive: PassiveDnsSource | None = None,
+    cert_probe: CertProbe = cert_hostnames,
 ) -> FastAPI:
     settings = settings or Settings()
 
@@ -138,6 +176,7 @@ def create_app(
         vuln_source = vulns or OsvClient()
         store = Store(settings.database_path)
         mail = mailer or _mailer_for(settings)
+        passive_src = passive if passive is not None else passive_source(settings.reverse_ip_provider, client)
         services = Services(
             settings=settings,
             http=client,
@@ -149,6 +188,8 @@ def create_app(
             limiter=RateLimiter(settings.scans_per_hour),
             store=store,
             mailer=mail,
+            passive=passive_src,
+            cert_probe=cert_probe,
             monitoring_enabled=bool(settings.smtp_host) or mailer is not None or settings.is_local,
         )
         scheduler = Scheduler(
@@ -244,6 +285,8 @@ def create_app(
     ) -> HTMLResponse:
         try:
             check_rate(request)
+            if looks_like_ip_target(target):
+                return page(request, "ip_scan.html", result=await svc(request).ip_scan(target))
             parsed, report = await run_site_scan(request, target, deep)
         except UnsafeTargetError as exc:
             return page(request, "index.html", 400, error=str(exc), target=target)
@@ -490,6 +533,8 @@ def create_app(
     @app.get("/api/scan")
     async def api_scan(request: Request, target: str, deep: bool = False, share: bool = False) -> Report:
         check_rate(request)
+        if looks_like_ip_target(target):
+            raise HTTPException(400, "This looks like an IP address or CIDR block; use /api/ip-scan instead")
         try:
             parsed, report = await run_site_scan(request, target, deep)
         except UnsafeTargetError as exc:
@@ -513,6 +558,30 @@ def create_app(
         except UploadError as exc:
             raise HTTPException(400, str(exc)) from exc
         return await svc(request).share(report) if share else report
+
+    @app.get("/api/ip-scan")
+    async def api_ip_scan(request: Request, target: str) -> JSONResponse:
+        check_rate(request)
+        try:
+            result = await svc(request).ip_scan(target)
+        except UnsafeTargetError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return JSONResponse(
+            {
+                "target": result.discovery.target.label,
+                "ips_probed": result.discovery.ips_probed,
+                "notes": result.discovery.notes,
+                "sites": [
+                    {
+                        "host": site.host,
+                        "found_via": site.sources,
+                        "ip": site.ip,
+                        "report": report.model_dump(mode="json"),
+                    }
+                    for site, report in result.scanned
+                ],
+            }
+        )
 
     @app.get("/api/reports/{rid}")
     async def api_report(request: Request, rid: str) -> Report:

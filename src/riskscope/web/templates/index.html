@@ -9,10 +9,10 @@
   <h2>Scan a website</h2>
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="/scan">
-    <label for="target">Website address</label>
+    <label for="target">Website address or IP</label>
     <div class="row">
-      <input id="target" name="target" type="text" placeholder="example.com" value="{{ target or '' }}" required
-             autocomplete="url" inputmode="url">
+      <input id="target" name="target" type="text" placeholder="example.com, 203.0.113.10 or 203.0.113.0/24"
+             value="{{ target or '' }}" required autocomplete="url">
       <button type="submit">Scan</button>
     </div>
     <label class="check"><input type="checkbox" name="deep" value="true">
@@ -21,7 +21,7 @@
       Create a shareable link to the report (private link, expires after {{ share_ttl_days }} days, you can delete it).</label>
   </form>
   <p class="muted">Checks HTTPS &amp; certificates, security headers, cookies, CORS, SPF/DMARC email spoofing
-    protection, DNS hardening, subdomain takeover, exposed files (.git, .env, backups) and outdated JavaScript libraries.</p>
+    protection, DNS hardening, subdomain takeover, exposed files (.git, .env, backups) and outdated JavaScript libraries. Enter an <strong>IP address or CIDR block</strong> and riskscope finds the site(s) hosted there (via reverse DNS and TLS certificates) and scans each.</p>
 </section>
 
 {% if monitoring_enabled %}
