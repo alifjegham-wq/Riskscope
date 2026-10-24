@@ -1,10 +1,10 @@
 # Proposal: offer riskscope to ANSI / tunCERT for coordinated protection of Tunisian organisations
 
-*Draft — fill in the bracketed parts before sending.*
+*Draft prepared from the maintainer's known details. Check the name/title and add your live scanner URL and phone before sending.*
 
 **To:** Agence Nationale de la Sécurité Informatique (ANSI) / tunCERT — contact@ansi.tn
-**From:** [your name], maintainer of riskscope — [your email]
-**Date:** [date]
+**From:** Alif Jegham, maintainer of riskscope — alifjegham@gmail.com
+**Date:** 24 October 2026
 
 ## Summary
 
@@ -46,6 +46,8 @@ self-check from an ANSI awareness page would be most useful. I can demo any of t
 ## About riskscope
 
 - Source: https://github.com/alifjegham-wq/Riskscope
+- Live public self-check: [add your deployed URL, e.g. https://riskscope-xxxx.onrender.com]
+- Maintainer: Alif Jegham — alifjegham@gmail.com — [add phone if you want a call]
 - Checks: TLS/certificates, security headers, cookies, CORS, SPF/DMARC, DNS hardening, subdomain takeover,
   exposed files, outdated front-end libraries, PHP version against critical advisories, and (for verified
   owners) risky open ports.
