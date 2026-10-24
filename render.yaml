@@ -1,0 +1,44 @@
+# One-click deploy on Render: https://render.com/deploy?repo=https://github.com/alifjegham-wq/Riskscope
+# See docs/DEPLOY.md for the step-by-step (works from a phone browser).
+services:
+  - type: web
+    name: riskscope
+    runtime: docker
+    # A persistent disk (for shared reports and monitors) needs a paid instance type.
+    # For a scan-only trial, change this to "free" and delete the disk block below:
+    # sharing and monitoring then reset on every restart and the free instance sleeps when idle.
+    plan: starter
+    healthCheckPath: /healthz
+    autoDeploy: true
+    disk:
+      name: riskscope-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      # HMAC key for ownership and monitor tokens. Generated once; never change it afterwards.
+      - key: RISKSCOPE_VERIFY_SECRET
+        generateValue: true
+      # Render's proxy puts the real visitor IP first in X-Forwarded-For (used for rate limiting),
+      # and uvicorn must trust its forwarded headers to know requests arrived over https.
+      - key: RISKSCOPE_TRUST_PROXY
+        value: "true"
+      - key: FORWARDED_ALLOW_IPS
+        value: "*"
+      - key: RISKSCOPE_SCANS_PER_HOUR
+        value: "20"
+      # Leave the public URL empty to use Render's own https://<name>.onrender.com address.
+      # Set it if you add a custom domain.
+      - key: RISKSCOPE_PUBLIC_BASE_URL
+        sync: false
+      # Email for monitoring alerts. Until RISKSCOPE_SMTP_HOST is set, the monitoring sign-up stays hidden
+      # and the site offers one-off scans and shareable reports only.
+      - key: RISKSCOPE_SMTP_HOST
+        sync: false
+      - key: RISKSCOPE_SMTP_PORT
+        value: "587"
+      - key: RISKSCOPE_SMTP_USERNAME
+        sync: false
+      - key: RISKSCOPE_SMTP_PASSWORD
+        sync: false
+      - key: RISKSCOPE_SMTP_FROM
+        sync: false

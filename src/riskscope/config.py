@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import os
 import secrets
+from urllib.parse import urlsplit
 
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_base_url() -> str:
+    # Render sets RENDER_EXTERNAL_URL to the service's public https:// address.
+    return os.environ.get("RENDER_EXTERNAL_URL") or "http://127.0.0.1:8000"
 
 
 class Settings(BaseSettings):
@@ -21,8 +29,9 @@ class Settings(BaseSettings):
     # ---- shared reports & monitoring ---------------------------------------
     #: SQLite file for opt-in shared reports and monitors (":memory:" for tests).
     database_path: str = "riskscope.db"
-    #: Absolute base URL used in share links and emails, e.g. https://riskscope.example.org
-    public_base_url: str = "http://127.0.0.1:8000"
+    #: Absolute base URL used in share links and emails, e.g. https://riskscope.example.org.
+    #: Defaults to the hosting platform's public URL when it provides one (Render), else localhost.
+    public_base_url: str = Field(default_factory=_default_base_url)
     share_ttl_days: int = 30
     scheduler_enabled: bool = True
     scheduler_interval_s: float = 300.0
@@ -35,3 +44,19 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = "riskscope <no-reply@localhost>"
     smtp_starttls: bool = True
+
+    @field_validator("public_base_url", mode="before")
+    @classmethod
+    def _blank_base_url(cls, v: object) -> object:
+        # Hosting dashboards often pass optional variables as empty strings.
+        return v.strip() or _default_base_url() if isinstance(v, str) else v
+
+    @field_validator("smtp_from", mode="before")
+    @classmethod
+    def _blank_sender(cls, v: object) -> object:
+        return v.strip() or "riskscope <no-reply@localhost>" if isinstance(v, str) else v
+
+    @property
+    def is_local(self) -> bool:
+        """Running on this machine (development), judged by the public base URL."""
+        return urlsplit(self.public_base_url).hostname in ("127.0.0.1", "localhost", "::1")

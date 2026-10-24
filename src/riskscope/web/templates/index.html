@@ -24,6 +24,7 @@
     protection, DNS hardening, subdomain takeover, exposed files (.git, .env, backups) and outdated JavaScript libraries.</p>
 </section>
 
+{% if monitoring_enabled %}
 <section class="card">
   <h2>Keep watching your site</h2>
   <p>Get an email when your security gets worse: a new issue, an expiring certificate, or a lower grade.
@@ -33,6 +34,7 @@
     <button type="submit">Set up monitoring</button>
   </form>
 </section>
+{% endif %}
 
 <section class="card">
   <h2>Scan your application code</h2>

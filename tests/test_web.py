@@ -224,3 +224,32 @@ def test_monitor_digest_opt_in_and_toggle() -> None:
         c.post(path + "/digest", data={"enabled": "true"})
         assert "Weekly summary: <strong>on</strong>" in c.get(path).text
         assert c.post(path[:-2] + "xx/digest", data={"enabled": "true"}).status_code == 404
+
+
+def test_public_server_without_smtp_hides_monitoring() -> None:
+    upstream = httpx.AsyncClient(transport=httpx.MockTransport(site({"/": httpx.Response(200, text="hi")})))
+    app = create_app(
+        Settings(
+            verify_secret=SECRET,
+            database_path=":memory:",
+            scheduler_enabled=False,
+            public_base_url="https://riskscope.onrender.com",
+        ),
+        http=upstream,
+        vulns=FakeVulns(),
+        resolver=public_resolver,
+        dns=_verified_dns(),
+        checks=[SecurityHeadersCheck()],
+    )
+    with TestClient(app) as c:
+        assert "Keep watching your site" not in c.get("/").text
+        assert "Set up monitoring" not in c.post("/scan", data={"target": "example.com"}).text
+        assert c.get("/monitor", params={"target": "example.com"}).status_code == 503
+        r = c.post("/monitor", data={"target": "example.com", "email": "me@example.com"})
+        assert r.status_code == 503 and "no email set up" in r.text
+        assert '<link rel="stylesheet" href="/static/style.css">' in c.get("/").text
+
+
+def test_local_server_keeps_monitoring_with_logged_email() -> None:
+    with make_client() as c:  # injected mailer counts as configured
+        assert "Keep watching your site" in c.get("/").text
