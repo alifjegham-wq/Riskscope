@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 from ..appscan import UploadError, expand_upload, scan_code
 from ..appscan.osv import OsvClient, VulnSource
 from ..checks import Check, ScanContext, default_checks
-from ..checks.base import DnsLookup, system_dns
+from ..checks.base import DnsLookup, ExistsLookup, system_dns, system_exists
 from ..config import Settings
 from ..models import Report, Severity
 from ..monitoring import Scheduler, confirm_email
@@ -71,6 +71,7 @@ class Services:
     vulns: VulnSource
     resolver: Resolver
     dns: DnsLookup
+    exists: ExistsLookup
     checks: list[Check]
     limiter: RateLimiter
     store: Store
@@ -90,7 +91,7 @@ class Services:
         """Website scan; active checks run only if asked for and ownership verifies right now."""
         fetcher = SafeFetcher(self.http, self.resolver)
         verified = want_active and await is_verified(target, self.settings.verify_secret, self.dns, fetcher)
-        ctx = ScanContext(target=target, fetcher=fetcher, dns=self.dns, verified_owner=verified)
+        ctx = ScanContext(target=target, fetcher=fetcher, dns=self.dns, exists=self.exists, verified_owner=verified)
         return await scan_website(ctx, self.checks)
 
     async def share(self, report: Report) -> Report:
@@ -121,6 +122,7 @@ def create_app(
     vulns: VulnSource | None = None,
     resolver: Resolver = system_resolver,
     dns: DnsLookup = system_dns,
+    exists: ExistsLookup = system_exists,
     checks: list[Check] | None = None,
     mailer: Mailer | None = None,
 ) -> FastAPI:
@@ -138,6 +140,7 @@ def create_app(
             vulns=vuln_source,
             resolver=resolver,
             dns=dns,
+            exists=exists,
             checks=checks if checks is not None else default_checks(vuln_source),
             limiter=RateLimiter(settings.scans_per_hour),
             store=store,

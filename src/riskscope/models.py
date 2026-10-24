@@ -34,6 +34,7 @@ class Category(StrEnum):
     HEADERS = "Browser protections"
     COOKIES = "Cookies"
     EMAIL = "Email & DNS"
+    SUBDOMAINS = "Subdomains"
     EXPOSURE = "Exposed files"
     SOFTWARE = "Outdated software"
     NETWORK = "Network services"

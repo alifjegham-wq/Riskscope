@@ -10,10 +10,11 @@ from .exposure import ExposedFilesCheck, SecurityTxtCheck
 from .headers import CorsCheck, HttpsRedirectCheck, SecurityHeadersCheck
 from .libraries import JsLibraryCheck
 from .ports import OpenPortsCheck
+from .subdomains import SubdomainSource, SubdomainTakeoverCheck
 from .tls import TlsCheck
 
 
-def default_checks(vulns: VulnSource) -> list[Check]:
+def default_checks(vulns: VulnSource, subdomains: SubdomainSource | None = None) -> list[Check]:
     return [
         TlsCheck(),
         HttpsRedirectCheck(),
@@ -24,6 +25,7 @@ def default_checks(vulns: VulnSource) -> list[Check]:
         DnsHardeningCheck(),
         ExposedFilesCheck(),
         SecurityTxtCheck(),
+        SubdomainTakeoverCheck(subdomains),
         JsLibraryCheck(vulns),
         OpenPortsCheck(),
     ]
