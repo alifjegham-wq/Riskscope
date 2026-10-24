@@ -10,7 +10,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def _default_base_url() -> str:
     # Render sets RENDER_EXTERNAL_URL to the service's public https:// address.
-    return os.environ.get("RENDER_EXTERNAL_URL") or "http://127.0.0.1:8000"
+    if url := os.environ.get("RENDER_EXTERNAL_URL"):
+        return url
+    # GitHub Codespaces forwards ports to https://<codespace>-<port>.<domain>.
+    name, domain = os.environ.get("CODESPACE_NAME"), os.environ.get("GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN")
+    if name and domain:
+        return f"https://{name}-{os.environ.get('PORT', '8000')}.{domain}"
+    return "http://127.0.0.1:8000"
 
 
 class Settings(BaseSettings):
@@ -29,6 +35,9 @@ class Settings(BaseSettings):
     # ---- shared reports & monitoring ---------------------------------------
     #: SQLite file for opt-in shared reports and monitors (":memory:" for tests).
     database_path: str = "riskscope.db"
+    #: False on hosts whose disk is wiped on restart (free tiers): shareable links and monitoring are then
+    #: hidden, because saved reports and monitors would silently disappear.
+    persistent_storage: bool = True
     #: Absolute base URL used in share links and emails, e.g. https://riskscope.example.org.
     #: Defaults to the hosting platform's public URL when it provides one (Render), else localhost.
     public_base_url: str = Field(default_factory=_default_base_url)
