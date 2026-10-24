@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block main %}
+<section class="hero">
+  <h1>How exposed is your website?</h1>
+  <p>Free security check: get a risk grade and a prioritised list of what to fix, with copy-paste config.</p>
+</section>
+
+<section class="card">
+  <h2>Scan a website</h2>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/scan">
+    <label for="target">Website address</label>
+    <div class="row">
+      <input id="target" name="target" type="text" placeholder="example.com" value="{{ target or '' }}" required
+             autocomplete="url" inputmode="url">
+      <button type="submit">Scan</button>
+    </div>
+    <label class="check"><input type="checkbox" name="deep" value="true">
+      Include active checks (open ports). Requires proving you own the domain.</label>
+  </form>
+  <p class="muted">Checks HTTPS &amp; certificates, security headers, cookies, CORS, SPF/DMARC email spoofing
+    protection, DNS hardening, exposed files (.git, .env, backups) and outdated JavaScript libraries.</p>
+</section>
+
+<section class="card">
+  <h2>Scan your application code</h2>
+  {% if code_error %}<p class="error" role="alert">{{ code_error }}</p>{% endif %}
+  <form method="post" action="/code" enctype="multipart/form-data">
+    <label for="files">Lockfiles, source files or a .zip of your project (max {{ max_upload_mb }} MB)</label>
+    <div class="row">
+      <input id="files" name="files" type="file" multiple required>
+      <button type="submit">Scan code</button>
+    </div>
+  </form>
+  <p class="muted">Finds dependencies with known vulnerabilities (npm, PyPI, Go, Packagist, RubyGems, crates.io via
+    <a href="https://osv.dev">OSV.dev</a>) and hard-coded secrets such as API keys and private keys.</p>
+</section>
+{% endblock %}

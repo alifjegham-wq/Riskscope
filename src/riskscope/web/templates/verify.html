@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Verify {{ target.host }}: riskscope{% endblock %}
+{% block main %}
+<section class="card">
+  <h1>Prove you own {{ target.host }}</h1>
+  {% if failed %}<p class="error" role="alert">We could not find the verification token yet. DNS changes can take a few
+    minutes to appear.</p>{% endif %}
+  <p>Active checks go further than a normal visitor, so we only run them for the domain's owner. Do <strong>one</strong> of:</p>
+  <h2>Option A: DNS TXT record</h2>
+  <dl class="kv">
+    <dt>Name</dt><dd><code>{{ dns_name }}</code></dd>
+    <dt>Value</dt><dd><code>{{ token }}</code></dd>
+  </dl>
+  <h2>Option B: file on your site</h2>
+  <p>Serve a file at <code>{{ file_url }}</code> containing exactly:</p>
+  <pre>{{ token }}</pre>
+  <form method="post" action="/scan">
+    <input type="hidden" name="target" value="{{ target.host }}">
+    <input type="hidden" name="deep" value="true">
+    <button type="submit">I've added it: run the full scan</button>
+  </form>
+  <p class="muted">You can remove the record or file afterwards.</p>
+</section>
+{% endblock %}

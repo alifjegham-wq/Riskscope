@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ report.target }}: grade {{ report.grade }} | riskscope{% endblock %}
+{% block main %}
+{% set counts = report.counts() %}
+<section class="summary card">
+  <div class="grade grade-{{ report.grade }}" aria-label="Grade {{ report.grade }}">{{ report.grade }}</div>
+  <div>
+    <h1>{{ report.target }}</h1>
+    <p class="risk">Risk level: <strong>{{ report.risk_level }}</strong> · score {{ report.score }}/100</p>
+    <p class="counts">
+      {% for sev in Severity %}{% if counts[sev] %}<span class="sev sev-{{ sev.value }}">{{ counts[sev] }} {{ sev.value }}</span> {% endif %}{% endfor %}
+      {% if not report.findings %}<span class="sev sev-ok">No issues found</span>{% endif %}
+    </p>
+    <p class="muted">{{ report.kind|capitalize }} scan · {{ report.started_at.strftime('%Y-%m-%d %H:%M UTC') }} ·
+      {{ (report.duration_ms / 1000)|round(1) }}s
+      {% if report.kind == 'website' %}· {% if report.verified_owner %}owner verified, active checks included{% else %}passive checks only (<a href="/verify?target={{ report.target|urlencode }}">verify ownership</a> for more){% endif %}{% endif %}</p>
+  </div>
+</section>
+
+{% if report.findings %}
+<section>
+  <h2>What to fix, most urgent first</h2>
+  {% for f in report.sorted_findings() %}
+  <details class="finding" {% if f.severity.rank <= 1 %}open{% endif %}>
+    <summary><span class="sev sev-{{ f.severity.value }}">{{ f.severity.value }}</span>
+      <span class="ftitle">{{ f.title }}</span> <span class="cat">{{ f.category.value }}</span></summary>
+    <p>{{ f.description }}</p>
+    {% if f.evidence %}<p class="label">Evidence</p><pre>{{ f.evidence }}</pre>{% endif %}
+    {% if f.fix %}<p class="label">How to fix</p><p>{{ f.fix }}</p>{% endif %}
+    {% for platform, code in f.snippets.items() %}
+      <p class="label">{{ platform }}</p><pre>{{ code }}</pre>
+    {% endfor %}
+    {% if f.references %}<p class="refs">{% for r in f.references %}<a href="{{ r }}" rel="noopener noreferrer">{{ r }}</a><br>{% endfor %}</p>{% endif %}
+  </details>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if report.passed %}
+<section class="card">
+  <h2>Passed</h2>
+  <ul class="passed">{% for p in report.passed %}<li>{{ p }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if report.errors %}
+<section class="card">
+  <h2>Couldn't check</h2>
+  <ul>{% for e in report.errors %}<li><strong>{{ e.check }}</strong>: {{ e.message }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<p><a href="/">← Scan something else</a></p>
+{% endblock %}

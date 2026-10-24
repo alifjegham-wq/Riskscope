@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}How it works: riskscope{% endblock %}
+{% block main %}
+<section class="card prose">
+  <h1>How riskscope works</h1>
+  <h2>Scoring</h2>
+  <p>Every scan starts at 100. Each finding subtracts points by severity:</p>
+  <table>
+    <tr><th>Severity</th><th>Points</th></tr>
+    {% for sev, w in weights.items() %}<tr><td><span class="sev sev-{{ sev.value }}">{{ sev.value }}</span></td><td>{{ w|int }}</td></tr>{% endfor %}
+  </table>
+  <p>Repeated findings in the same category count half for the second and a quarter after that, so one noisy area
+    can't dominate. Any critical finding caps the score at {{ critical_cap }} (an F), because one critical issue is
+    usually enough for a breach.</p>
+  <table>
+    <tr><th>Grade</th><th>Score</th><th>Risk level</th></tr>
+    <tr><td>A</td><td>90+</td><td>Low</td></tr>
+    <tr><td>B</td><td>80–89</td><td>Moderate</td></tr>
+    <tr><td>C</td><td>65–79</td><td>Moderate</td></tr>
+    <tr><td>D</td><td>50–64</td><td>High</td></tr>
+    <tr><td>F</td><td>&lt;50</td><td>Critical</td></tr>
+  </table>
+  <h2>Passive vs. active checks</h2>
+  <p>Passive checks only do what a browser or search engine does: load your homepage, request a short list of
+    well-known file paths, and read public DNS. Anyone can run them on any public site.</p>
+  <p>Active checks (currently: probing for risky open ports such as databases and RDP) only run after you prove
+    ownership with a DNS record or a file on the site.</p>
+  <h2>Privacy</h2>
+  <p>Scan results aren't stored. Uploaded code is processed in memory and discarded; only package names and
+    versions are sent to OSV.dev to look up vulnerabilities. Secrets found in code are masked in the report.</p>
+  <h2>Limits</h2>
+  <p>An external scan can't see everything: business-logic flaws, server-side injection bugs and internal
+    misconfigurations need an authenticated test or code review. A good grade is a healthy baseline, not a
+    guarantee.</p>
+</section>
+{% endblock %}
