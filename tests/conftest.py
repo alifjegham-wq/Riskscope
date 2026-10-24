@@ -20,11 +20,25 @@ async def public_resolver(host: str) -> list[str]:
 
 
 class FakeDns:
-    def __init__(self, records: dict[tuple[str, str], list[str]] | None = None) -> None:
+    """Records keyed by (name, type). `missing` names answer NXDOMAIN; `unknown` ones time out."""
+
+    def __init__(
+        self,
+        records: dict[tuple[str, str], list[str]] | None = None,
+        missing: set[str] | None = None,
+        unknown: set[str] | None = None,
+    ) -> None:
         self.records = records or {}
+        self.missing = missing or set()
+        self.unknown = unknown or set()
 
     async def __call__(self, name: str, rdtype: str) -> list[str]:
         return self.records.get((name, rdtype), [])
+
+    async def exists(self, name: str) -> bool | None:
+        if name in self.unknown:
+            return None
+        return name not in self.missing
 
 
 class FakeVulns:
@@ -54,10 +68,12 @@ def make_ctx(
     handler: Handler, dns: FakeDns | None = None, host: str = "example.com", verified: bool = False
 ) -> ScanContext:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    dns = dns or FakeDns()
     return ScanContext(
         target=parse_target(host),
         fetcher=SafeFetcher(client, public_resolver),
-        dns=dns or FakeDns(),
+        dns=dns,
+        exists=dns.exists,
         verified_owner=verified,
     )
 

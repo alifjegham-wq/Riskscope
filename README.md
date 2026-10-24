@@ -17,7 +17,15 @@ It is built for people who don't have a security team: small businesses, freelan
 | Cookies | `Secure`, `HttpOnly`, `SameSite`, rated higher for session cookies |
 | Email & DNS | SPF (missing / multiple / `+all`), DMARC (missing / `p=none`), CAA, DNSSEC |
 | Exposed files | `.git`, `.env`, AWS credentials, SQL dumps, config backups, `.htpasswd`, backup archives, `server-status`, `phpinfo`, `.DS_Store`, directory listing, `security.txt` |
+| Subdomains | Subdomain takeover: subdomains (from certificate transparency logs plus common names) whose CNAME points at an unclaimed GitHub Pages, Heroku, S3, Azure, Shopify, Fastly, … resource, and dangling CNAMEs to names that no longer exist |
 | Outdated software | Version disclosure in headers; front-end JS libraries (jQuery, Bootstrap, Angular, Lodash, …) checked against [OSV.dev](https://osv.dev) |
+
+Subdomain takeover detection only flags a service when there's evidence the resource is unclaimed: either the
+service's own "nothing here" page (fingerprints based on
+[can-i-take-over-xyz](https://github.com/EdOverflow/can-i-take-over-xyz)) or, for providers where that is enough,
+the CNAME target no longer existing in DNS. DNS timeouts are never counted as "doesn't exist". It costs only DNS
+lookups plus one homepage request for subdomains that point at a known service. The scanned domain name is sent to
+[crt.sh](https://crt.sh) to look up certificate transparency logs.
 
 Exposed-file checks match file *contents* (e.g. `ref: refs/` for `.git/HEAD`), so sites that answer
 "200 OK" for every URL don't produce false positives.
@@ -159,7 +167,8 @@ Each website check is a class with `name`, `title`, `active` and `async run(ctx)
 - [x] Scheduled re-scans with email alerts on regressions, certificate expiry and outages
 - [ ] Background job queue so long scans don't hold a request open; Postgres store for multi-instance deploys
 - [ ] Weekly digest option and webhook/Slack alerts for monitors
-- [ ] Subdomain discovery from certificate transparency, plus dangling-CNAME (subdomain takeover) detection
+- [x] Subdomain discovery from certificate transparency, plus dangling-CNAME (subdomain takeover) detection
+- [ ] NS-delegation takeovers (subdomains delegated to unclaimed DNS zones) and scheduled fingerprint refresh
 - [ ] More active checks for verified owners: open redirects, reflected XSS canaries, admin panel default credentials
 - [ ] Static analysis (SAST) of uploaded code; `pnpm-lock.yaml`, Maven/Gradle lockfiles
 - [ ] Dependency-file scanning straight from a public GitHub repo URL
