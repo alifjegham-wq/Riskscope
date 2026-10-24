@@ -253,6 +253,23 @@ def test_scan_page_ip_with_no_site() -> None:
         assert r.status_code == 200 and "No website found" in r.text
 
 
+def test_bulk_accepts_ip_and_scans_hosts_passively() -> None:
+    dns = FakeDns({(ptr("8.8.8.8"), "PTR"): ["found.example.com."]})
+    with make_ip_client(dns, lambda ip: []) as c:
+        r = c.post("/bulk", data={"targets": "8.8.8.8"})
+        assert r.status_code == 200
+        assert "found.example.com" in r.text
+        assert "found on 8.8.8.8 · passive checks only" in r.text
+        assert "No Content-Security-Policy" in r.text  # the discovered host was really scanned
+        assert 'data-export="csv"' in r.text
+
+
+def test_bulk_ip_with_no_site_reports_nothing_found() -> None:
+    with make_ip_client(FakeDns(), lambda ip: []) as c:
+        body = c.post("/api/bulk-scan", data={"targets": ["8.8.8.8"]}).json()
+        assert body["items"][0]["error"] == "No sites found on this IP or range"
+
+
 def test_api_ip_scan_and_domain_guard() -> None:
     dns = FakeDns({(ptr("8.8.8.8"), "PTR"): ["found.example.com."]})
     with make_ip_client(dns, lambda ip: ["cert.example.com"]) as c:

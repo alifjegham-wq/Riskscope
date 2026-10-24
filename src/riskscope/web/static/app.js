@@ -42,4 +42,55 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   });
+
+  // Export bulk / IP-scan results. The rows are rendered server-side into a non-executable JSON
+  // <script> tag, so no data is fetched or built from the DOM and the CSP (script-src 'self') holds.
+  setupExport();
 });
+
+function setupExport() {
+  const island = document.getElementById("scan-export");
+  const buttons = document.querySelectorAll("[data-export]");
+  if (!island || buttons.length === 0) return;
+  let rows;
+  try {
+    rows = JSON.parse(island.textContent || "[]");
+  } catch {
+    return;
+  }
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  const columns = Object.keys(rows[0]);
+
+  const toCsv = () => {
+    const esc = (v) => {
+      const s = v === null || v === undefined ? "" : String(v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const lines = [columns.join(",")];
+    for (const row of rows) lines.push(columns.map((c) => esc(row[c])).join(","));
+    return lines.join("\r\n");
+  };
+
+  const download = (text, type, ext, base) => {
+    const blob = new Blob([text], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (base || "riskscope") + "-" + new Date().toISOString().slice(0, 10) + "." + ext;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const base = btn.getAttribute("data-filename") || "riskscope";
+      if (btn.getAttribute("data-export") === "json") {
+        download(JSON.stringify(rows, null, 2), "application/json", "json", base);
+      } else {
+        download(toCsv(), "text/csv", "csv", base);
+      }
+    });
+  });
+}

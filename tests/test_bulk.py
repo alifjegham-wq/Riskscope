@@ -69,4 +69,46 @@ def test_api_bulk_scan_shape() -> None:
 def test_bulk_form_linked_from_home() -> None:
     with client([]) as c:
         assert 'href="/bulk"' in c.get("/").text
-        assert "Scan several of your sites" in c.get("/bulk").text
+        assert "Scan several of your assets" in c.get("/bulk").text
+
+
+def test_bulk_profile_narrows_checks() -> None:
+    with client(["mine.com"]) as c:
+        # 'email' excludes security_headers (the only registered check), so it does not run.
+        narrowed = c.post("/bulk", data={"targets": "mine.com", "profile": "email"})
+        assert narrowed.status_code == 200 and "No Content-Security-Policy" not in narrowed.text
+        full = c.post("/bulk", data={"targets": "mine.com", "profile": "full"})
+        assert "No Content-Security-Policy" in full.text
+
+
+def test_bulk_offers_export() -> None:
+    with client(["mine.com"]) as c:
+        r = c.post("/bulk", data={"targets": "mine.com"})
+        assert 'id="scan-export"' in r.text
+        assert 'data-export="csv"' in r.text and 'data-export="json"' in r.text
+        assert '"grade"' in r.text  # export rows are serialized into the page
+
+
+def test_export_rows_shape() -> None:
+    from riskscope.models import Report
+    from riskscope.web.app import BulkItem, _export_rows
+
+    rows = _export_rows(
+        [
+            BulkItem(
+                target="mine.com", host="mine.com", verified=True, report=Report(target="mine.com", kind="website")
+            ),
+            BulkItem(target="other.com", host="other.com", token="t"),
+            BulkItem(target="junk", error="bad"),
+            BulkItem(
+                target="203.0.113.0/24",
+                host="found.example.com",
+                report=Report(target="x", kind="website"),
+                via="found on 203.0.113.0/24",
+            ),
+        ]
+    )
+    assert [r["status"] for r in rows] == ["scanned", "unverified", "error", "scanned"]
+    assert rows[0]["grade"] == "A" and rows[0]["score"] == 100
+    assert rows[3]["note"] == "found on 203.0.113.0/24"
+    assert rows[2]["note"] == "bad"

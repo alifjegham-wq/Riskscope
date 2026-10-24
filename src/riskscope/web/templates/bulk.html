@@ -6,9 +6,17 @@
     <h1>Asset scan</h1>
     <p class="muted">{{ result.scanned }} scanned ·
       {{ result.unverified }} awaiting ownership verification ·
-      {{ result.items|length }} submitted</p>
+      {{ result.items|length }} results</p>
   </div>
 </section>
+
+{% if export_rows %}
+<div class="actions">
+  <button type="button" class="secondary" data-export="csv" data-filename="riskscope-assets">⬇ Download CSV</button>
+  <button type="button" class="secondary" data-export="json" data-filename="riskscope-assets">⬇ Download JSON</button>
+</div>
+<script type="application/json" id="scan-export">{{ export_rows|tojson }}</script>
+{% endif %}
 
 {% for item in result.items %}
 {% if item.report %}
@@ -23,7 +31,7 @@
       {% for sev in Severity %}{% if counts[sev] %}<span class="sev sev-{{ sev.value }}">{{ counts[sev] }} {{ sev.value }}</span> {% endif %}{% endfor %}
       {% if not report.findings %}<span class="sev sev-ok">No issues found</span>{% endif %}
     </p>
-    <p class="muted">Owner verified · active checks included · {{ (report.duration_ms / 1000)|round(1) }}s</p>
+    <p class="muted">{% if item.verified %}Owner verified · active checks included{% elif item.via %}{{ item.via }} · passive checks only{% else %}passive checks only{% endif %} · {{ (report.duration_ms / 1000)|round(1) }}s</p>
   </div>
 </section>
 {% if report.findings %}
