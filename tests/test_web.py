@@ -313,3 +313,13 @@ def test_installable_app_assets() -> None:
         assert "caches" in sw.text and sw.headers["cache-control"] == "no-cache"
         assert "You're offline" in c.get("/offline").text.replace("&#39;", "'")
         assert c.get("/static/apple-touch-icon.png").status_code == 200
+
+
+def test_policy_pages_render() -> None:
+    with make_client() as c:
+        aup = c.get("/acceptable-use")
+        assert aup.status_code == 200 and "Only scan what" in aup.text and "written permission" in aup.text
+        priv = c.get("/privacy")
+        assert priv.status_code == 200 and "processed in memory" in priv.text
+        home = c.get("/").text
+        assert '<a href="/acceptable-use">' in home and '<a href="/privacy">' in home
