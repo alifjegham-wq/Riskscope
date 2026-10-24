@@ -132,6 +132,15 @@ sent, so you can follow the links locally.
 
 ## Deploying
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/alifjegham-wq/riskscope)
+
+The quickest way to put riskscope online is the Render blueprint (`render.yaml`). **[docs/DEPLOY.md](docs/DEPLOY.md)**
+walks through it step by step, from a phone browser if you like, including email setup for monitoring. On a
+public server without SMTP settings the monitoring sign-up stays hidden. The public URL defaults to the
+platform's own (`RENDER_EXTERNAL_URL`), and the container listens on `$PORT`.
+
+Any other Docker host works too:
+
 ```bash
 docker build -t riskscope .
 docker run -p 8000:8000 -v riskscope-data:/data \

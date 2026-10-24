@@ -63,7 +63,7 @@
 </section>
 {% endif %}
 
-{% if report.kind == 'website' and not shared %}
+{% if report.kind == 'website' and not shared and monitoring_enabled %}
 <section class="card">
   <h2>Keep an eye on {{ report.target }}</h2>
   <p>We can re-scan daily or weekly and email you when something gets worse.</p>

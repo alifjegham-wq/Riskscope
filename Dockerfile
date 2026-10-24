@@ -11,4 +11,6 @@ ENV RISKSCOPE_DATABASE_PATH=/data/riskscope.db
 VOLUME /data
 USER scanner
 EXPOSE 8000
-CMD ["/app/.venv/bin/uvicorn", "riskscope.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+# Hosting platforms (Render, Fly, Railway...) pass the port to listen on in $PORT. Behind such a platform's
+# TLS proxy set FORWARDED_ALLOW_IPS='*' so uvicorn trusts its X-Forwarded-* headers (https scheme, client IP).
+CMD ["sh", "-c", "exec /app/.venv/bin/uvicorn riskscope.web.app:create_app --factory --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips \"${FORWARDED_ALLOW_IPS:-127.0.0.1}\""]

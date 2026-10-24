@@ -77,6 +77,9 @@ class Services:
     limiter: RateLimiter
     store: Store
     mailer: Mailer
+    #: Monitoring needs working email. On a public server without SMTP the sign-up is hidden, because
+    #: confirmation emails would only reach the server log. Locally the log is how you follow the links.
+    monitoring_enabled: bool = True
 
     @property
     def base_url(self) -> str:
@@ -146,6 +149,7 @@ def create_app(
             limiter=RateLimiter(settings.scans_per_hour),
             store=store,
             mailer=mail,
+            monitoring_enabled=bool(settings.smtp_host) or mailer is not None or settings.is_local,
         )
         scheduler = Scheduler(
             store=store,
@@ -212,6 +216,7 @@ def create_app(
                 "Severity": Severity,
                 "max_upload_mb": svc(request).settings.max_upload_mb,
                 "share_ttl_days": svc(request).settings.share_ttl_days,
+                "monitoring_enabled": svc(request).monitoring_enabled,
                 **ctx,
             },
             status_code=status,
@@ -326,8 +331,18 @@ def create_app(
 
     # ---- monitoring --------------------------------------------------------
 
+    def monitoring_off(request: Request) -> HTMLResponse:
+        return message(
+            request,
+            "Monitoring isn't available here yet",
+            "This server has no email set up, so it can't send monitoring alerts. One-off scans work as usual.",
+            503,
+        )
+
     @app.get("/monitor", response_class=HTMLResponse)
     async def monitor_form(request: Request, target: str) -> HTMLResponse:
+        if not svc(request).monitoring_enabled:
+            return monitoring_off(request)
         try:
             parsed = parse_target(target)
         except UnsafeTargetError as exc:
@@ -343,6 +358,8 @@ def create_app(
         digest: Annotated[bool, Form()] = False,
     ) -> HTMLResponse:
         s = svc(request)
+        if not s.monitoring_enabled:
+            return monitoring_off(request)
         email = email.strip()
         try:
             parsed = parse_target(target)
