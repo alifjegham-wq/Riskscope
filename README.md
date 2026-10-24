@@ -219,6 +219,13 @@ Each website check is a class with `name`, `title`, `active` and `async run(ctx)
 - [ ] Dependency-file scanning straight from a public GitHub repo URL
 - [ ] PDF / shareable report export for compliance evidence
 
+## Coordinated disclosure (no scanning)
+
+Found problems on sites you don't control? The lawful way to help is coordinated disclosure, not scanning.
+`riskscope-disclose` turns a CSV of findings you obtained lawfully (e.g. a Shodan/Censys/Rapid7 export) into
+polite notification emails grouped by recipient — it performs no scanning. See
+[docs/DISCLOSURE.md](docs/DISCLOSURE.md).
+
 ## Responsible use
 
 Only scan websites and code that you own or are explicitly authorised to test. Passive checks behave like an
