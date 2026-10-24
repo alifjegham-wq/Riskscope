@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% set nav = 'bulk' %}
+{% block title %}Save an asset group: riskscope{% endblock %}
+{% block main %}
+<section class="card">
+  <h1>Save a group of your assets</h1>
+  <p>Give a set of domains you own a name, so you can re-scan them all in one click and (optionally) get an
+    email when any of them gets worse. Every scan still verifies ownership of each domain — saving a group
+    doesn't let anyone scan sites they don't control.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/groups">
+    <label for="name">Group name</label>
+    <input id="name" name="name" type="text" value="{{ gname or '' }}" placeholder="My company sites" required>
+
+    <label for="assets" class="spaced">Domains (one per line)</label>
+    <textarea id="assets" name="assets" rows="7" required
+      placeholder="example.com&#10;shop.example.com&#10;blog.example.com">{{ assets or '' }}</textarea>
+
+    {% if monitoring_enabled %}
+    <label for="group-email" class="spaced">Email for alerts (optional)</label>
+    <input id="group-email" name="email" type="email" value="{{ email or '' }}" placeholder="you@example.com">
+    <p class="muted">Leave blank to just save the group. If you add an email, we'll send a confirmation link; after
+      you activate it, we re-scan the group and email you only when something gets worse.</p>
+    <label for="group-freq" class="spaced">Re-scan frequency</label>
+    <select id="group-freq" name="frequency">
+      {% for f in frequencies %}
+      <option value="{{ f.value }}"{% if (frequency.value if frequency else 'weekly') == f.value %} selected{% endif %}>{{ f.value|capitalize }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+
+    <p class="spaced"><button type="submit">Save group</button></p>
+  </form>
+  <p class="muted">Only domains can be saved in a group (not IP ranges), because monitoring re-verifies ownership
+    of each one. You can scan IPs/CIDR ranges any time from the <a href="/bulk">bulk scan</a> page.</p>
+</section>
+{% endblock %}

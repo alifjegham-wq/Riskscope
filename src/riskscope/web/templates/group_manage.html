@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}{{ group.name }}: asset group | riskscope{% endblock %}
+{% block main %}
+{% set base = '/g/' ~ group.id ~ '/' ~ token %}
+<section class="summary card">
+  <div>
+    <h1>{{ group.name }}</h1>
+    <p class="muted">{{ members|length }} domain{{ '' if members|length == 1 else 's' }} ·
+      {% if group.monitoring %}monitoring on ({{ group.frequency.value }}){% elif group.email and not group.confirmed %}monitoring not activated yet{% else %}monitoring off{% endif %}</p>
+  </div>
+</section>
+
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+<section class="card">
+  <h2>Re-scan the whole group</h2>
+  <form method="post" action="{{ base }}/scan" class="row">
+    <select name="profile" aria-label="Scan profile">
+      {% for value, label in profiles.items() %}
+      <option value="{{ value }}"{% if default_profile == value %} selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Scan all {{ members|length }} now</button>
+  </form>
+  <p class="muted">Each domain is scanned only after it passes ownership verification, exactly like a single scan.</p>
+</section>
+
+<section class="card">
+  <h2>Domains</h2>
+  {% if members %}
+  <table>
+    <tr><th>Domain</th><th>Last grade</th><th></th></tr>
+    {% for m in members %}
+    <tr>
+      <td><code>{{ m.host }}</code></td>
+      <td>{% if m.prev_grade %}<span class="mini-grade grade-{{ m.prev_grade }}">{{ m.prev_grade }}</span>
+        {% if m.prev_score is not none %}<span class="muted">{{ m.prev_score }}</span>{% endif %}{% else %}<span class="muted">not scanned yet</span>{% endif %}</td>
+      <td><form method="post" action="{{ base }}/remove"><input type="hidden" name="host" value="{{ m.host }}">
+        <button type="submit" class="secondary">Remove</button></form></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No domains in this group yet.</p>{% endif %}
+  <form method="post" action="{{ base }}/add" class="spaced">
+    <label for="add-assets">Add domains (one per line)</label>
+    <textarea id="add-assets" name="assets" rows="3" required placeholder="new.example.com"></textarea>
+    <p class="spaced"><button type="submit" class="secondary">Add</button></p>
+  </form>
+</section>
+
+{% if monitoring_enabled %}
+<section class="card">
+  <h2>Email monitoring</h2>
+  {% if group.monitoring %}
+  <p>We re-scan this group <strong>{{ group.frequency.value }}</strong> and email <code>{{ group.email }}</code>
+    when any domain gets worse (a lower grade or a clear score drop).</p>
+  <form method="post" action="{{ base }}/frequency" class="row">
+    <select name="frequency" aria-label="Frequency">
+      {% for f in frequencies %}
+      <option value="{{ f.value }}"{% if group.frequency.value == f.value %} selected{% endif %}>{{ f.value|capitalize }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="secondary">Change frequency</button>
+  </form>
+  <form method="post" action="{{ base }}/unsubscribe" class="spaced">
+    <button type="submit" class="secondary">Pause monitoring</button>
+  </form>
+  {% elif group.email and not group.confirmed %}
+  <p>Monitoring for <code>{{ group.email }}</code> isn't active yet. Open the link we emailed, or activate it here:</p>
+  <form method="post" action="{{ base }}/activate">
+    <button type="submit">Activate monitoring</button>
+  </form>
+  {% else %}
+  <p>Get an email when any domain in this group gets worse. We'll send a confirmation link first.</p>
+  <form method="post" action="{{ base }}/monitoring">
+    <label for="m-email">Email</label>
+    <input id="m-email" name="email" type="email" required placeholder="you@example.com">
+    <label for="m-freq" class="spaced">Frequency</label>
+    <select id="m-freq" name="frequency">
+      {% for f in frequencies %}<option value="{{ f.value }}">{{ f.value|capitalize }}</option>{% endfor %}
+    </select>
+    <p class="spaced"><button type="submit">Turn on monitoring</button></p>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Delete this group</h2>
+  <p class="muted">Removes the saved group and any monitoring. This can't be undone.</p>
+  <form method="post" action="{{ base }}/delete"><button type="submit" class="danger">Delete group</button></form>
+</section>
+
+<p><a href="/">← Home</a> · <a href="/bulk">Bulk scan</a></p>
+{% endblock %}

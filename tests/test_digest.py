@@ -156,7 +156,13 @@ async def test_tick_sends_digest_only_when_due_and_opted_in() -> None:
     store._db.execute("UPDATE monitors SET next_run_at = ?", (1e12,))
     store.save_report(report(), 100 * DAY, monitor_id=m.id, now=3 * DAY)
     sched = Scheduler(
-        store, NoScan(), mailer, "https://rs.test", 100 * DAY, lambda mon: f"https://rs.test/m/{mon.id}/t"
+        store,
+        NoScan(),
+        mailer,
+        "https://rs.test",
+        100 * DAY,
+        lambda mon: f"https://rs.test/m/{mon.id}/t",
+        lambda g: f"https://rs.test/g/{g.id}/t",
     )
 
     await sched.tick(now=DIGEST_PERIOD_S - 1)

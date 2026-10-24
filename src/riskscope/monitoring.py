@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from .models import Finding, Report, Severity
 from .notify import Email, Mailer
 from .safety import Target, parse_target
-from .store import DIGEST_PERIOD_S, Monitor, Store
+from .store import DIGEST_PERIOD_S, Group, Monitor, Store
 
 log = logging.getLogger(__name__)
 
@@ -208,6 +208,50 @@ def confirm_email(monitor: Monitor, manage_url: str) -> Email:
     return Email(monitor.email, f"[riskscope] Confirm monitoring for {monitor.target}", body)
 
 
+GROUP_SCORE_DROP = 5  # points; a same-grade drop this large still counts as a regression.
+
+#: (host, old grade, old score, new grade, new score)
+Regression = tuple[str, str, int | None, str, int]
+
+
+def grade_worse(old_grade: str, old_score: int | None, new_grade: str, new_score: int) -> bool:
+    """True if the asset got worse: a lower grade, or the same grade with a clear score drop."""
+    oi, ni = _GRADE_ORDER.index(old_grade), _GRADE_ORDER.index(new_grade)
+    if ni != oi:
+        return ni > oi
+    return old_score is not None and new_score <= old_score - GROUP_SCORE_DROP
+
+
+def group_alert_email(group: Group, regressions: list[Regression], manage_url: str) -> Email:
+    assert group.email is not None
+    lines = "\n".join(
+        f"  - {host}: {og} ({os_ if os_ is not None else '?'}) -> {ng} ({ns})" for host, og, os_, ng, ns in regressions
+    )
+    body = (
+        f'riskscope re-scanned the assets in "{group.name}". '
+        f"{len(regressions)} got worse since the last run:\n\n{lines}\n\n"
+        f"Open the group to see each report and how to fix it, change frequency, or stop these emails:\n"
+        f"{manage_url}\n"
+    )
+    return Email(
+        group.email,
+        f'[riskscope] {len(regressions)} asset(s) in "{group.name}" got worse',
+        body,
+        unsubscribe_url=manage_url + "/unsubscribe",
+    )
+
+
+def group_confirm_email(group: Group, manage_url: str) -> Email:
+    assert group.email is not None
+    body = (
+        f'Someone (hopefully you) asked riskscope to re-scan the assets in "{group.name}" '
+        f"{group.frequency.value} and email {group.email} when any of them gets worse.\n\n"
+        f'To switch it on, open this link and press "Activate monitoring":\n{manage_url}\n\n'
+        "If this wasn't you, ignore this email. The group stays saved but no emails are sent.\n"
+    )
+    return Email(group.email, f'[riskscope] Confirm monitoring for "{group.name}"', body)
+
+
 @dataclass
 class Scheduler:
     store: Store
@@ -217,6 +261,8 @@ class Scheduler:
     report_ttl_s: float
     #: Builds the monitor's private manage URL (it embeds the HMAC token).
     manage_link: Callable[[Monitor], str]
+    #: Builds a group's private manage URL (also an HMAC token).
+    group_manage_link: Callable[[Group], str]
 
     async def _send(self, email: Email) -> None:
         try:
@@ -277,7 +323,29 @@ class Scheduler:
         # After the scans, so a digest that falls due with a scan includes it.
         for monitor in await asyncio.to_thread(self.store.claim_due_digests, now):
             await self.send_digest(monitor, now)
+        for group in await asyncio.to_thread(self.store.claim_due_groups, now):
+            await self.run_group(group)
         return len(due)
+
+    async def run_group(self, group: Group) -> None:
+        """Re-scan every asset in a group, update each one's last grade, and email a single summary
+        if any got worse. Each scan re-verifies ownership, so a saved group grants no scanning rights."""
+        members = await asyncio.to_thread(self.store.list_members, group.id)
+        regressions: list[Regression] = []
+        ran = 0
+        for m in members:
+            try:
+                report = await self.scan(parse_target(m.host), True)
+            except Exception as exc:  # noqa: BLE001 - one bad member must not stop the group run
+                log.info("group %s member %s scan failed: %s", group.id, m.host, exc)
+                continue
+            ran += 1
+            if m.prev_grade is not None and grade_worse(m.prev_grade, m.prev_score, report.grade, report.score):
+                regressions.append((m.host, m.prev_grade, m.prev_score, report.grade, report.score))
+            await asyncio.to_thread(self.store.record_member_result, group.id, m.host, report.grade, report.score)
+        await asyncio.to_thread(self.store.record_group_run, group.id, ran > 0)
+        if regressions:
+            await self._send(group_alert_email(group, regressions, self.group_manage_link(group)))
 
     async def run_forever(self, interval_s: float) -> None:
         while True:

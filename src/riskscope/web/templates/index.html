@@ -35,7 +35,8 @@
   </form>
   <p class="muted"><a href="/bulk">Own several sites?</a> Scan them together (each gated behind ownership proof).
     Enter an <strong>IP address or CIDR block</strong> and riskscope finds the site(s) hosted there
-    (via reverse DNS and TLS certificates) and scans each.</p>
+    (via reverse DNS and TLS certificates) and scans each.{% if sharing_enabled %}
+    Or <a href="/groups">save them as a group</a> to re-scan in one click{% if monitoring_enabled %} and get alerts when something gets worse{% endif %}.{% endif %}</p>
 </section>
 
 <section>

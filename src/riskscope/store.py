@@ -55,6 +55,26 @@ CREATE TABLE IF NOT EXISTS monitors (
 );
 CREATE INDEX IF NOT EXISTS monitors_due ON monitors(confirmed, next_run_at);
 CREATE INDEX IF NOT EXISTS monitors_email ON monitors(email);
+
+CREATE TABLE IF NOT EXISTS groups (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    email       TEXT,
+    frequency   TEXT NOT NULL DEFAULT 'weekly',
+    confirmed   INTEGER NOT NULL DEFAULT 0,
+    monitoring  INTEGER NOT NULL DEFAULT 0,
+    created_at  REAL NOT NULL,
+    next_run_at REAL NOT NULL DEFAULT 0,
+    failures    INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS group_members (
+    group_id   TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    host       TEXT NOT NULL,
+    prev_grade TEXT,
+    prev_score INTEGER,
+    PRIMARY KEY (group_id, host)
+);
+CREATE INDEX IF NOT EXISTS groups_due ON groups(monitoring, confirmed, next_run_at);
 """
 
 #: Columns added after the first release: (table, column, definition). Applied to older databases on startup.
@@ -95,6 +115,14 @@ def check_monitor_token(secret: str, monitor_id: str, token: str) -> bool:
     return hmac.compare_digest(monitor_token(secret, monitor_id).encode(), token.encode())
 
 
+def group_token(secret: str, group_id: str) -> str:
+    return hmac.new(secret.encode(), b"group:" + group_id.encode(), hashlib.sha256).hexdigest()[:40]
+
+
+def check_group_token(secret: str, group_id: str, token: str) -> bool:
+    return hmac.compare_digest(group_token(secret, group_id).encode(), token.encode())
+
+
 @dataclass(frozen=True)
 class StoredReport:
     id: str
@@ -125,6 +153,30 @@ class HistoryPoint:
     created_at: float
     grade: str
     score: int
+
+
+@dataclass(frozen=True)
+class GroupMember:
+    host: str
+    prev_grade: str | None = None
+    prev_score: int | None = None
+
+
+@dataclass(frozen=True)
+class Group:
+    """A saved, named set of assets the user owns. Membership is just a convenience list:
+    scanning a group still verifies ownership of each host at scan time, so a stored group
+    never grants scanning rights on its own."""
+
+    id: str
+    name: str
+    email: str | None
+    frequency: Frequency
+    confirmed: bool
+    monitoring: bool
+    created_at: float
+    next_run_at: float
+    failures: int
 
 
 class Store:
@@ -351,6 +403,131 @@ class Store:
             ).fetchall()
         return [HistoryPoint(r["id"], r["created_at"], r["grade"], r["score"]) for r in rows]
 
+    # ---- asset groups ------------------------------------------------------
+
+    def create_group(
+        self,
+        name: str,
+        hosts: list[str],
+        *,
+        email: str | None = None,
+        frequency: Frequency = Frequency.WEEKLY,
+        now: float | None = None,
+    ) -> Group:
+        now = time.time() if now is None else now
+        gid = new_id()
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO groups (id, name, email, frequency, created_at) VALUES (?, ?, ?, ?, ?)",
+                (gid, name, email.lower() if email else None, frequency.value, now),
+            )
+            self._db.executemany(
+                "INSERT OR IGNORE INTO group_members (group_id, host) VALUES (?, ?)",
+                [(gid, h) for h in hosts],
+            )
+        group = self.get_group(gid)
+        assert group is not None
+        return group
+
+    def get_group(self, gid: str) -> Group | None:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM groups WHERE id = ?", (gid,)).fetchone()
+        return _group(row) if row else None
+
+    def list_members(self, gid: str) -> list[GroupMember]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT host, prev_grade, prev_score FROM group_members WHERE group_id = ? ORDER BY host",
+                (gid,),
+            ).fetchall()
+        return [GroupMember(r["host"], r["prev_grade"], r["prev_score"]) for r in rows]
+
+    def add_members(self, gid: str, hosts: list[str], *, cap: int) -> None:
+        with self._lock:
+            current = self._db.execute("SELECT COUNT(*) FROM group_members WHERE group_id = ?", (gid,)).fetchone()[0]
+            room = max(0, cap - int(current))
+            if room:
+                self._db.executemany(
+                    "INSERT OR IGNORE INTO group_members (group_id, host) VALUES (?, ?)",
+                    [(gid, h) for h in hosts[:room]],
+                )
+
+    def remove_member(self, gid: str, host: str) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM group_members WHERE group_id = ? AND host = ?", (gid, host))
+
+    def record_member_result(self, gid: str, host: str, grade: str, score: int) -> None:
+        with self._lock:
+            self._db.execute(
+                "UPDATE group_members SET prev_grade = ?, prev_score = ? WHERE group_id = ? AND host = ?",
+                (grade, score, gid, host),
+            )
+
+    def set_group_email(self, gid: str, email: str, frequency: Frequency) -> None:
+        with self._lock:
+            self._db.execute(
+                "UPDATE groups SET email = ?, frequency = ?, confirmed = 0, monitoring = 0 WHERE id = ?",
+                (email.lower(), frequency.value, gid),
+            )
+
+    def confirm_group(self, gid: str, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        with self._lock:
+            self._db.execute(
+                "UPDATE groups SET confirmed = 1, monitoring = 1, next_run_at = ? WHERE id = ? AND email IS NOT NULL",
+                (now, gid),
+            )
+
+    def set_group_monitoring(self, gid: str, enabled: bool, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        with self._lock:
+            # Only a confirmed email may turn monitoring on.
+            self._db.execute(
+                "UPDATE groups SET monitoring = CASE WHEN ? AND confirmed = 1 THEN 1 ELSE 0 END, next_run_at = ?"
+                " WHERE id = ?",
+                (int(enabled), now, gid),
+            )
+
+    def set_group_frequency(self, gid: str, frequency: Frequency) -> None:
+        with self._lock:
+            self._db.execute("UPDATE groups SET frequency = ? WHERE id = ?", (frequency.value, gid))
+
+    def delete_group(self, gid: str) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM groups WHERE id = ?", (gid,))
+
+    def count_groups_for_email(self, email: str) -> int:
+        with self._lock:
+            row = self._db.execute("SELECT COUNT(*) FROM groups WHERE email = ?", (email.lower(),)).fetchone()
+        return int(row[0])
+
+    def record_group_run(self, gid: str, ok: bool) -> None:
+        with self._lock:
+            if ok:
+                self._db.execute("UPDATE groups SET failures = 0 WHERE id = ?", (gid,))
+            else:
+                self._db.execute("UPDATE groups SET failures = failures + 1 WHERE id = ?", (gid,))
+
+    def claim_due_groups(self, now: float | None = None, limit: int = 5) -> list[Group]:
+        """Return monitored, confirmed groups whose next run is due, pushing their next run forward."""
+        now = time.time() if now is None else now
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                rows = self._db.execute(
+                    "SELECT * FROM groups WHERE monitoring = 1 AND confirmed = 1 AND next_run_at <= ?"
+                    " ORDER BY next_run_at LIMIT ?",
+                    (now, limit),
+                ).fetchall()
+                for row in rows:
+                    period = Frequency(row["frequency"]).seconds
+                    self._db.execute("UPDATE groups SET next_run_at = ? WHERE id = ?", (now + period, row["id"]))
+                self._db.execute("COMMIT")
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+        return [_group(r) for r in rows]
+
 
 def _stored(row: sqlite3.Row) -> StoredReport:
     return StoredReport(
@@ -359,6 +536,20 @@ def _stored(row: sqlite3.Row) -> StoredReport:
         created_at=row["created_at"],
         expires_at=row["expires_at"],
         monitor_id=row["monitor_id"],
+    )
+
+
+def _group(row: sqlite3.Row) -> Group:
+    return Group(
+        id=row["id"],
+        name=row["name"],
+        email=row["email"],
+        frequency=Frequency(row["frequency"]),
+        confirmed=bool(row["confirmed"]),
+        monitoring=bool(row["monitoring"]),
+        created_at=row["created_at"],
+        next_run_at=row["next_run_at"],
+        failures=row["failures"],
     )
 
 

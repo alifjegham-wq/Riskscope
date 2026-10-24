@@ -45,12 +45,21 @@ from ..ipscan import (
     passive_source,
 )
 from ..models import Report, Severity
-from ..monitoring import Scheduler, confirm_email
+from ..monitoring import Scheduler, confirm_email, group_confirm_email
 from ..notify import Email, LogMailer, Mailer, SmtpMailer
 from ..safety import Resolver, SafeFetcher, Target, UnsafeTargetError, parse_target, system_resolver
 from ..scanner import scan_website
 from ..scoring import CRITICAL_CAP, GRADES, WEIGHTS
-from ..store import Frequency, Monitor, Store, check_monitor_token, monitor_token
+from ..store import (
+    Frequency,
+    Group,
+    Monitor,
+    Store,
+    check_group_token,
+    check_monitor_token,
+    group_token,
+    monitor_token,
+)
 from ..verification import DNS_LABEL, WELL_KNOWN_PATH, is_verified, token_for
 from .ratelimit import RateLimiter
 
@@ -73,7 +82,7 @@ SECURITY_HEADERS = {
 }
 # Shared reports and manage pages are reachable by link only: keep them out of search engines and caches.
 PRIVATE_PAGE_HEADERS = {"X-Robots-Tag": "noindex, nofollow", "Cache-Control": "private, no-store"}
-_PRIVATE_PREFIXES = ("/r/", "/m/", "/api/reports/")
+_PRIVATE_PREFIXES = ("/r/", "/m/", "/g/", "/api/reports/")
 _EMAIL = re.compile(r"^[^@\s]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}$")
 
 
@@ -169,6 +178,9 @@ class Services:
 
     def manage_url(self, monitor: Monitor) -> str:
         return f"{self.base_url}/m/{monitor.id}/{monitor_token(self.settings.verify_secret, monitor.id)}"
+
+    def group_manage_url(self, group: Group) -> str:
+        return f"{self.base_url}/g/{group.id}/{group_token(self.settings.verify_secret, group.id)}"
 
     async def verified(self, target: Target) -> bool:
         return await is_verified(target, self.settings.verify_secret, self.dns, SafeFetcher(self.http, self.resolver))
@@ -318,6 +330,7 @@ def create_app(
             base_url=services.base_url,
             report_ttl_s=settings.share_ttl_days * 86_400,
             manage_link=services.manage_url,
+            group_manage_link=services.group_manage_url,
         )
         app.state.services = services
         app.state.scheduler = scheduler
@@ -689,6 +702,236 @@ def create_app(
             "Monitoring stopped",
             f"We won't scan {monitor.target} or email you about it again. Its scan history has been deleted.",
         )
+
+    # ---- asset groups ------------------------------------------------------
+
+    def groups_off(request: Request) -> HTMLResponse:
+        return message(
+            request,
+            "Saved groups aren't available here",
+            "This server has no persistent storage, so groups can't be saved. One-off and bulk scans work as usual.",
+            503,
+        )
+
+    def _group_hosts(raw: str, cap: int) -> tuple[list[str], list[str]]:
+        """Parse a textarea into deduped domain hosts (+ a list of skipped entries)."""
+        hosts: list[str] = []
+        skipped: list[str] = []
+        seen: set[str] = set()
+        for line in raw.replace(",", "\n").splitlines():
+            entry = line.strip()
+            if not entry:
+                continue
+            if looks_like_ip_target(entry):
+                skipped.append(entry)  # groups hold domains you can verify, not IP ranges
+                continue
+            try:
+                host = parse_target(entry).host
+            except UnsafeTargetError:
+                skipped.append(entry)
+                continue
+            if host not in seen:
+                seen.add(host)
+                hosts.append(host)
+            if len(hosts) >= cap:
+                break
+        return hosts, skipped
+
+    @app.get("/groups", response_class=HTMLResponse)
+    async def group_form(request: Request) -> HTMLResponse:
+        if not svc(request).sharing_enabled:
+            return groups_off(request)
+        return page(request, "group_new.html", frequencies=list(Frequency))
+
+    @app.post("/groups", response_model=None)
+    async def group_create(
+        request: Request,
+        name: Annotated[str, Form()],
+        assets: Annotated[str, Form()],
+        email: Annotated[str, Form()] = "",
+        frequency: Annotated[Frequency, Form()] = Frequency.WEEKLY,
+    ) -> Response:
+        s = svc(request)
+        if not s.sharing_enabled:
+            return groups_off(request)
+        name = name.strip() or "My assets"
+        email = email.strip()
+        hosts, _skipped = _group_hosts(assets, s.settings.max_bulk_targets)
+        cap = s.settings.max_monitors_per_email
+
+        def again(error: str, status: int = 400) -> HTMLResponse:
+            return page(
+                request,
+                "group_new.html",
+                status,
+                error=error,
+                gname=name,
+                assets=assets,
+                email=email,
+                frequency=frequency,
+                frequencies=list(Frequency),
+            )
+
+        if not hosts:
+            return again("Enter at least one domain.")
+        if email and not s.monitoring_enabled:
+            return again("This server can't send monitoring emails; leave the email blank to just save the group.")
+        if email and not _EMAIL.match(email):
+            return again("Enter a valid email address, or leave it blank.")
+        if email and await asyncio.to_thread(s.store.count_groups_for_email, email) >= cap:
+            return again(f"An email address can monitor at most {cap} groups.")
+
+        group = await asyncio.to_thread(
+            partial(s.store.create_group, name, hosts, email=email or None, frequency=frequency)
+        )
+        if email:
+            try:
+                await s.mailer.send(group_confirm_email(group, s.group_manage_url(group)))
+            except Exception:  # noqa: BLE001 - SMTP trouble is retryable, not a crash
+                log.exception("could not send group confirm email")
+        return RedirectResponse(f"/g/{group.id}/{group_token(s.settings.verify_secret, group.id)}", status_code=303)
+
+    async def group_or_404(request: Request, gid: str, token: str) -> Group | None:
+        s = svc(request)
+        if not check_group_token(s.settings.verify_secret, gid, token):
+            return None
+        return await asyncio.to_thread(s.store.get_group, gid)
+
+    def group_gone(request: Request) -> HTMLResponse:
+        return message(request, "Group not found", "This link is wrong, or the group was deleted.", 404)
+
+    async def render_group(request: Request, group: Group, token: str, error: str | None = None) -> HTMLResponse:
+        members = await asyncio.to_thread(svc(request).store.list_members, group.id)
+        return page(
+            request,
+            "group_manage.html",
+            group=group,
+            token=token,
+            members=members,
+            frequencies=list(Frequency),
+            error=error,
+        )
+
+    @app.get("/g/{gid}/{token}", response_class=HTMLResponse)
+    async def group_manage(request: Request, gid: str, token: str) -> HTMLResponse:
+        group = await group_or_404(request, gid, token)
+        if group is None:
+            return group_gone(request)
+        return await render_group(request, group, token)
+
+    @app.post("/g/{gid}/{token}/scan", response_class=HTMLResponse)
+    async def group_scan(
+        request: Request, gid: str, token: str, profile: Annotated[str, Form()] = DEFAULT_PROFILE
+    ) -> HTMLResponse:
+        s = svc(request)
+        group = await group_or_404(request, gid, token)
+        if group is None:
+            return group_gone(request)
+        try:
+            check_rate(request)
+        except HTTPException as exc:
+            return await render_group(request, group, token, error=str(exc.detail))
+        members = await asyncio.to_thread(s.store.list_members, gid)
+        result = await s.bulk_scan([m.host for m in members], normalize_profile(profile))
+        for item in result.items:
+            if item.report and item.host:
+                await asyncio.to_thread(
+                    s.store.record_member_result, gid, item.host, item.report.grade, item.report.score
+                )
+        return page(
+            request,
+            "bulk.html",
+            result=result,
+            export_rows=_export_rows(result.items),
+            group_back=s.group_manage_url(group).replace(s.base_url, ""),
+            group_name=group.name,
+        )
+
+    @app.post("/g/{gid}/{token}/add", response_model=None)
+    async def group_add(request: Request, gid: str, token: str, assets: Annotated[str, Form()]) -> Response:
+        s = svc(request)
+        group = await group_or_404(request, gid, token)
+        if group is None:
+            return group_gone(request)
+        hosts, _ = _group_hosts(assets, s.settings.max_bulk_targets)
+        if hosts:
+            await asyncio.to_thread(s.store.add_members, gid, hosts, cap=s.settings.max_bulk_targets)
+        return RedirectResponse(f"/g/{gid}/{token}", status_code=303)
+
+    @app.post("/g/{gid}/{token}/remove", response_model=None)
+    async def group_remove(request: Request, gid: str, token: str, host: Annotated[str, Form()]) -> Response:
+        s = svc(request)
+        group = await group_or_404(request, gid, token)
+        if group is None:
+            return group_gone(request)
+        await asyncio.to_thread(s.store.remove_member, gid, host)
+        return RedirectResponse(f"/g/{gid}/{token}", status_code=303)
+
+    @app.post("/g/{gid}/{token}/monitoring", response_class=HTMLResponse)
+    async def group_set_monitoring(
+        request: Request,
+        gid: str,
+        token: str,
+        email: Annotated[str, Form()],
+        frequency: Annotated[Frequency, Form()] = Frequency.WEEKLY,
+    ) -> HTMLResponse:
+        s = svc(request)
+        group = await group_or_404(request, gid, token)
+        if group is None:
+            return group_gone(request)
+        email = email.strip()
+        if not s.monitoring_enabled:
+            return await render_group(request, group, token, error="This server can't send monitoring emails.")
+        if not _EMAIL.match(email):
+            return await render_group(request, group, token, error="Enter a valid email address.")
+        await asyncio.to_thread(s.store.set_group_email, gid, email, frequency)
+        updated = await asyncio.to_thread(s.store.get_group, gid)
+        if updated is not None:
+            try:
+                await s.mailer.send(group_confirm_email(updated, s.group_manage_url(updated)))
+            except Exception:  # noqa: BLE001
+                log.exception("could not send group confirm email")
+        return message(
+            request,
+            "Check your inbox",
+            f'We sent a link to {email}. Open it and press "Activate monitoring" to start watching this group.',
+        )
+
+    @app.post("/g/{gid}/{token}/activate", response_model=None)
+    async def group_activate(request: Request, gid: str, token: str) -> Response:
+        group = await group_or_404(request, gid, token)
+        if group is None:
+            return group_gone(request)
+        if group.email and not group.confirmed:
+            await asyncio.to_thread(svc(request).store.confirm_group, gid)
+        return RedirectResponse(f"/g/{gid}/{token}", status_code=303)
+
+    @app.post("/g/{gid}/{token}/frequency", response_model=None)
+    async def group_frequency(
+        request: Request, gid: str, token: str, frequency: Annotated[Frequency, Form()]
+    ) -> Response:
+        group = await group_or_404(request, gid, token)
+        if group is None:
+            return group_gone(request)
+        await asyncio.to_thread(svc(request).store.set_group_frequency, gid, frequency)
+        return RedirectResponse(f"/g/{gid}/{token}", status_code=303)
+
+    @app.post("/g/{gid}/{token}/unsubscribe", response_class=HTMLResponse)
+    async def group_stop_monitoring(request: Request, gid: str, token: str) -> HTMLResponse:
+        """RFC 8058 one-click unsubscribe target: turns monitoring off but keeps the saved group."""
+        group = await group_or_404(request, gid, token)
+        if group is None:
+            return group_gone(request)
+        await asyncio.to_thread(svc(request).store.set_group_monitoring, gid, False)
+        return message(request, "Monitoring paused", "We won't email you about this group. It's still saved.")
+
+    @app.post("/g/{gid}/{token}/delete", response_class=HTMLResponse)
+    async def group_delete(request: Request, gid: str, token: str) -> HTMLResponse:
+        group = await group_or_404(request, gid, token)
+        if group is None:
+            return group_gone(request)
+        await asyncio.to_thread(svc(request).store.delete_group, gid)
+        return message(request, "Group deleted", "The saved group and its monitoring have been removed.")
 
     # ---- JSON API ------------------------------------------------------------
 
