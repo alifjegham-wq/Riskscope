@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Asset scan results: riskscope{% endblock %}
 {% block main %}
+{% if group_name %}<p class="muted"><a href="{{ group_back }}">← Back to “{{ group_name }}”</a></p>{% endif %}
 <section class="summary card">
   <div>
-    <h1>Asset scan</h1>
+    <h1>{% if group_name %}{{ group_name }}{% else %}Asset scan{% endif %}</h1>
     <p class="muted">{{ result.scanned }} scanned ·
       {{ result.unverified }} awaiting ownership verification ·
       {{ result.items|length }} results</p>

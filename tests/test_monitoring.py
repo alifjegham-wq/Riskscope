@@ -62,6 +62,7 @@ def make(reports: list[Report | Exception]) -> tuple[Scheduler, Store, LogMailer
         base_url="https://rs.test",
         report_ttl_s=1000,
         manage_link=lambda mon: f"https://rs.test/m/{mon.id}/tok",
+        group_manage_link=lambda g: f"https://rs.test/g/{g.id}/tok",
     )
     return sched, store, mailer, scan, m
 
