@@ -5,7 +5,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
-RUN uv sync --frozen --no-dev && useradd --system --uid 10001 scanner
+RUN uv sync --frozen --no-dev && useradd --system --uid 10001 scanner \
+    && mkdir /data && chown scanner /data
+ENV RISKSCOPE_DATABASE_PATH=/data/riskscope.db
+VOLUME /data
 USER scanner
 EXPOSE 8000
 CMD ["/app/.venv/bin/uvicorn", "riskscope.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

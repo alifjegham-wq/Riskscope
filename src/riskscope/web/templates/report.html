@@ -2,6 +2,19 @@
 {% block title %}{{ report.target }}: grade {{ report.grade }} | riskscope{% endblock %}
 {% block main %}
 {% set counts = report.counts() %}
+{% if report.share_url %}
+<section class="card notice">
+  <h2>Shareable link</h2>
+  <p>Anyone with this link can view the report until it expires in {{ share_ttl_days }} days:</p>
+  <pre>{{ report.share_url }}</pre>
+  <p class="muted">Keep this delete link private. It's shown only once:<br>
+    <a href="{{ report.delete_url }}">{{ report.delete_url }}</a></p>
+</section>
+{% endif %}
+{% if shared %}
+<p class="muted shared-note">Shared report · scanned {{ report.started_at.strftime('%Y-%m-%d %H:%M UTC') }} ·
+  link expires {{ shared.expires_at|datetime }}</p>
+{% endif %}
 <section class="summary card">
   <div class="grade grade-{{ report.grade }}" aria-label="Grade {{ report.grade }}">{{ report.grade }}</div>
   <div>
@@ -47,6 +60,14 @@
 <section class="card">
   <h2>Couldn't check</h2>
   <ul>{% for e in report.errors %}<li><strong>{{ e.check }}</strong>: {{ e.message }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if report.kind == 'website' and not shared %}
+<section class="card">
+  <h2>Keep an eye on {{ report.target }}</h2>
+  <p>We can re-scan daily or weekly and email you when something gets worse.</p>
+  <p><a class="button" href="/monitor?target={{ report.target|urlencode }}">Set up monitoring</a></p>
 </section>
 {% endif %}
 

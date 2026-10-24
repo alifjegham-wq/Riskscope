@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Monitoring {{ monitor.target }}: riskscope{% endblock %}
+{% block main %}
+<section class="card">
+  <h1>Monitoring {{ monitor.target }}</h1>
+  {% if not monitor.confirmed %}
+    <p>Monitoring isn't switched on yet. Press the button to start. The first scan runs within a few minutes and
+      we'll email you the result.</p>
+    <form method="post" action="/m/{{ monitor.id }}/{{ token }}/activate"><button type="submit">Activate</button></form>
+  {% else %}
+    <p>Active · re-scanned <strong>{{ monitor.frequency.value }}</strong> · alerts go to {{ monitor.email }}<br>
+      <span class="muted">Next scan around {{ monitor.next_run_at|datetime }}</span></p>
+    {% if monitor.failures %}<p class="error">The last {{ monitor.failures }} scan(s) failed to reach the site.</p>{% endif %}
+  {% endif %}
+  <p class="muted">Bookmark this page: it's your private link for managing this monitor.</p>
+</section>
+
+{% if history %}
+<section class="card">
+  <h2>History</h2>
+  <table class="history">
+    <tr><th>Scanned</th><th>Grade</th><th>Score</th><th></th></tr>
+    {% for h in history %}
+    <tr><td>{{ h.created_at|datetime }}</td><td><span class="mini-grade grade-{{ h.grade }}">{{ h.grade }}</span></td>
+      <td>{{ h.score }}</td><td><a href="/r/{{ h.report_id }}">Report</a></td></tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Settings</h2>
+  <form method="post" action="/m/{{ monitor.id }}/{{ token }}/frequency" class="row">
+    <label for="frequency" class="sr-only">How often</label>
+    <select id="frequency" name="frequency">
+      {% for f in frequencies %}<option value="{{ f.value }}" {% if monitor.frequency == f %}selected{% endif %}>{{ f.value|capitalize }}</option>{% endfor %}
+    </select>
+    <button type="submit">Save</button>
+  </form>
+  <form method="post" action="/m/{{ monitor.id }}/{{ token }}/unsubscribe" class="spaced">
+    <button type="submit" class="danger">Stop monitoring and delete history</button>
+  </form>
+</section>
+{% endblock %}
