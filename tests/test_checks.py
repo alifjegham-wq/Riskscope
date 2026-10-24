@@ -20,6 +20,7 @@ GOOD_HEADERS = {
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
     "permissions-policy": "camera=()",
+    "cross-origin-opener-policy": "same-origin",
 }
 
 
@@ -203,6 +204,54 @@ async def test_exposed_new_probes() -> None:
     assert "exposure..git-credentials" in found
     assert "exposure.adminer.php" in found
     assert "exposure.storage.logs.laravel.log" in found
+
+
+async def test_exposed_cloud_and_infra_probes() -> None:
+    routes = {
+        "/actuator/heapdump": httpx.Response(200, content=b"JAVA PROFILE 1.0.2\x00\x00\x00\x00"),
+        "/actuator/env": httpx.Response(200, content=b'{"activeProfiles":[],"propertySources":[{"name":"x"}]}'),
+        "/terraform.tfstate": httpx.Response(200, content=b'{\n  "version": 4,\n  "terraform_version": "1.9.0"\n}'),
+        "/.env.bak": httpx.Response(200, text="DB_HOST=db\nDB_PASSWORD=hunter2\n"),
+        "/.npmrc": httpx.Response(200, text="//registry.npmjs.org/:_authToken=npm_SECRETTOKEN\n"),
+        "/.kube/config": httpx.Response(200, text="apiVersion: v1\nclusters:\n- cluster: {}\ncurrent-context: prod\n"),
+        "/appsettings.json": httpx.Response(200, content=b'{"ConnectionStrings":{"Default":"Server=db;Pwd=x"}}'),
+        "/@vite/client": httpx.Response(200, content=b"export function createHotContext(){} // __vite__"),
+        "/": httpx.Response(200, text="<html>home</html>"),
+    }
+    found = {f.id: f for f in await ExposedFilesCheck().run(make_ctx(site(routes)))}
+    assert "exposure.actuator.heapdump" in found and found["exposure.actuator.heapdump"].severity is Severity.CRITICAL
+    assert "exposure.actuator.env" in found and found["exposure.actuator.env"].severity is Severity.HIGH
+    assert "exposure.terraform.tfstate" in found
+    assert "exposure..env.bak" in found and found["exposure..env.bak"].severity is Severity.CRITICAL
+    assert "exposure..npmrc" in found
+    assert "exposure..kube.config" in found and found["exposure..kube.config"].severity is Severity.CRITICAL
+    assert "exposure.appsettings.json" in found
+    assert "exposure.@vite.client" in found
+    # Custom remediation and references flow through for the app-endpoint probes.
+    assert "CVE-2026-39364" in found["exposure.@vite.client"].references[0]
+    assert "Actuator" in found["exposure.actuator.env"].fix
+
+
+async def test_coop_and_deprecated_headers() -> None:
+    missing = ids(await SecurityHeadersCheck().run(make_ctx(site({"/": httpx.Response(200, headers=GOOD_HEADERS)}))))
+    assert missing == set()  # GOOD_HEADERS now includes COOP; nothing flagged
+
+    no_coop = {k: v for k, v in GOOD_HEADERS.items() if k != "cross-origin-opener-policy"}
+    found = ids(await SecurityHeadersCheck().run(make_ctx(site({"/": httpx.Response(200, headers=no_coop)}))))
+    assert found == {"headers.coop.missing"}
+
+    risky = {
+        **GOOD_HEADERS,
+        "public-key-pins": 'pin-sha256="abc"; max-age=5184000',
+        "x-xss-protection": "1; mode=block",
+    }
+    found = ids(await SecurityHeadersCheck().run(make_ctx(site({"/": httpx.Response(200, headers=risky)}))))
+    assert found == {"headers.deprecated"}
+
+
+async def test_safe_x_xss_protection_zero_is_not_flagged() -> None:
+    h = {**GOOD_HEADERS, "x-xss-protection": "0"}
+    assert await SecurityHeadersCheck().run(make_ctx(site({"/": httpx.Response(200, headers=h)}))) == []
 
 
 async def test_tls_certificate_quality() -> None:
