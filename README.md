@@ -12,6 +12,7 @@ It is built for people who don't have a security team: small businesses, freelan
 
 | Area | Checks |
 |---|---|
+| By IP / CIDR | Enter an IP address or a small CIDR block and riskscope finds the site(s) hosted there (reverse DNS, TLS certificate names, optional passive DNS) and runs the passive checks below on each |
 | Encryption (TLS) | Certificate trust and expiry, TLS 1.0/1.1 still accepted, HTTP → HTTPS redirect |
 | Browser protections | HSTS, Content-Security-Policy (incl. `unsafe-inline`), clickjacking, `nosniff`, Referrer-Policy, Permissions-Policy, CORS origin reflection |
 | Cookies | `Secure`, `HttpOnly`, `SameSite`, rated higher for session cookies |
@@ -32,6 +33,16 @@ PHP advisories are a data table in `src/riskscope/checks/php.py` (`ADVISORIES`, 
 ships the next emergency release, add an entry there. Because distributions backport fixes without changing the
 version string, a vulnerable-looking version on a server that reports RHEL, Debian, Ubuntu and similar is
 rated high (with a "check your distribution's advisory" note) rather than critical.
+
+### Scanning by IP or CIDR
+
+Enter an IP (e.g. `1.1.1.1`) or a small block (e.g. `1.1.1.0/30`) instead of a domain. riskscope finds the
+hostnames served there from reverse DNS (PTR), the names on the TLS certificate on port 443, and, if a
+provider is configured, passive DNS, then runs the passive website checks on each. Only public, globally
+routable addresses are accepted; blocks larger than `RISKSCOPE_MAX_CIDR_HOSTS` are refused. Every discovered
+hostname is forward-confirmed (it must itself resolve to a public address) before it is scanned, so a crafted
+PTR or certificate can't redirect the scanner inward. Active port checks are never run this way — they still
+need per-domain ownership verification.
 
 Exposed-file checks match file *contents* (e.g. `ref: refs/` for `.git/HEAD`), so sites that answer
 "200 OK" for every URL don't produce false positives.
@@ -109,6 +120,8 @@ curl 'http://127.0.0.1:8000/api/scan?target=example.com&deep=true'   # needs own
 curl -F files=@package-lock.json -F files=@settings.py http://127.0.0.1:8000/api/code
 curl 'http://127.0.0.1:8000/api/scan?target=example.com&share=true'    # response includes share_url / delete_url
 curl 'http://127.0.0.1:8000/api/reports/<id>'                           # fetch a shared report as JSON
+curl 'http://127.0.0.1:8000/api/ip-scan?target=1.1.1.1'                  # find & scan the site(s) on an IP
+curl 'http://127.0.0.1:8000/api/ip-scan?target=1.1.1.0/30'              # ...or a small CIDR block
 ```
 
 Without `RISKSCOPE_SMTP_HOST`, emails (monitor confirmations, alerts) are printed to the server log instead of
@@ -121,6 +134,9 @@ sent, so you can follow the links locally.
 | `RISKSCOPE_VERIFY_SECRET` | random per process | HMAC key for ownership and monitor-management tokens. **Set it in production**: if it changes, verification tokens and every monitor's manage/unsubscribe link break |
 | `RISKSCOPE_SCANS_PER_HOUR` | 20 | Scans per client IP per hour |
 | `RISKSCOPE_MAX_UPLOAD_MB` | 20 | Upload size limit |
+| `RISKSCOPE_MAX_CIDR_HOSTS` | 256 | Largest CIDR block (addresses) one IP scan may enumerate |
+| `RISKSCOPE_MAX_IP_SITES` | 10 | Most sites one IP/CIDR request will scan |
+| `RISKSCOPE_REVERSE_IP_PROVIDER` | none | Reverse-IP passive-DNS provider: `none` or `hackertarget` (sends the scanned IP to that service) |
 | `RISKSCOPE_TRUST_PROXY` | false | Take the client IP from `X-Forwarded-For` (only behind your own proxy) |
 | `RISKSCOPE_PUBLIC_BASE_URL` | `http://127.0.0.1:8000` | Absolute URL used in share links and emails |
 | `RISKSCOPE_PERSISTENT_STORAGE` | true | Set to false on hosts whose disk is wiped on restart: hides shareable links and monitoring |

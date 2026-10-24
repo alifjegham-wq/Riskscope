@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     trust_proxy: bool = False
     http_timeout_s: float = 10.0
 
+    # ---- scanning by IP / CIDR ---------------------------------------------
+    #: Largest CIDR block (number of addresses) one request may enumerate.
+    max_cidr_hosts: int = 256
+    #: Most distinct sites one IP/CIDR request will actually scan.
+    max_ip_sites: int = 10
+    #: Passive-DNS provider for reverse-IP lookups: "none" (default) or "hackertarget".
+    #: Anything but "none" sends the scanned IP to that third-party service.
+    reverse_ip_provider: str = "none"
+
     # ---- shared reports & monitoring ---------------------------------------
     #: SQLite file for opt-in shared reports and monitors (":memory:" for tests).
     database_path: str = "riskscope.db"
