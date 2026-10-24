@@ -14,12 +14,13 @@ It is built for people who don't have a security team: small businesses, freelan
 |---|---|
 | Bulk (your assets) | Scan many of your own domains at once at `/bulk` — each gated behind ownership verification, so it only ever runs on sites you control. Verified domains get the full scan incl. the active port check |
 | By IP / CIDR | Enter an IP address or a small CIDR block and riskscope finds the site(s) hosted there (reverse DNS, TLS certificate names, optional passive DNS) and runs the passive checks below on each |
-| Encryption (TLS) | Certificate trust and expiry, TLS 1.0/1.1 still accepted, HTTP → HTTPS redirect |
-| Browser protections | HSTS, Content-Security-Policy (incl. `unsafe-inline`), clickjacking, `nosniff`, Referrer-Policy, Permissions-Policy, CORS origin reflection |
+| Encryption (TLS) | Certificate trust and expiry, weak key (<2048-bit RSA), SHA-1 signature, over-long validity, TLS 1.0/1.1 still accepted, HTTP → HTTPS redirect |
+| Browser protections | HSTS, Content-Security-Policy (incl. `unsafe-inline`/`unsafe-eval`, wildcard sources, missing `object-src`/`base-uri`), mixed content (http on an https page), clickjacking, `nosniff`, Referrer-Policy, Permissions-Policy, CORS origin reflection |
 | Cookies | `Secure`, `HttpOnly`, `SameSite`, rated higher for session cookies |
 | Email & DNS | SPF (missing / multiple / `+all`), DMARC (missing / `p=none`), CAA, DNSSEC |
-| Exposed files | `.git`, `.env`, AWS credentials, SQL dumps, config backups, `.htpasswd`, backup archives, `server-status`, `phpinfo`, `.DS_Store`, directory listing, `security.txt` |
+| Exposed files | `.git`, `.svn`, `.hg`, `.env`(+variants), `.git-credentials`, AWS creds, SQL dumps, config backups, Laravel logs, VS Code SFTP config, `docker-compose.yml`, `.htpasswd`, backup archives, `server-status`, `phpinfo`, phpMyAdmin/Adminer, `.DS_Store`, directory listing, `security.txt` |
 | Subdomains | Subdomain takeover: subdomains (from certificate transparency logs plus common names) whose CNAME points at an unclaimed GitHub Pages, Heroku, S3, Azure, Shopify, Fastly, … resource, and dangling CNAMEs to names that no longer exist |
+| WordPress | Version disclosure (`readme.html`), REST-API user enumeration, XML-RPC enabled |
 | PHP runtime | PHP version (from headers or an exposed `phpinfo()`) checked against critical PHP advisories, currently **PHP2Shell** (CVE-2026-109618/-109619, fixed in 8.5.12 / 8.4.27 / 8.3.36 / 8.2.35), plus end-of-life branches. Hidden versions get an info note listing the safe releases |
 | Outdated software | Version disclosure in headers; front-end JS libraries (jQuery, Bootstrap, Angular, Lodash, …) checked against [OSV.dev](https://osv.dev) |
 

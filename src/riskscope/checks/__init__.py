@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..appscan.osv import VulnSource
 from .base import Check, ScanContext
+from .content import MixedContentCheck
 from .cookies import CookieCheck
 from .dns_email import DnsHardeningCheck, EmailAuthCheck
 from .exposure import ExposedFilesCheck, SecurityTxtCheck
@@ -13,6 +14,7 @@ from .php import PhpVersionCheck
 from .ports import OpenPortsCheck
 from .subdomains import SubdomainSource, SubdomainTakeoverCheck
 from .tls import TlsCheck
+from .wordpress import WordPressCheck
 
 
 def default_checks(vulns: VulnSource, subdomains: SubdomainSource | None = None) -> list[Check]:
@@ -20,6 +22,7 @@ def default_checks(vulns: VulnSource, subdomains: SubdomainSource | None = None)
         TlsCheck(),
         HttpsRedirectCheck(),
         SecurityHeadersCheck(),
+        MixedContentCheck(),
         CookieCheck(),
         CorsCheck(),
         EmailAuthCheck(),
@@ -29,6 +32,7 @@ def default_checks(vulns: VulnSource, subdomains: SubdomainSource | None = None)
         SubdomainTakeoverCheck(subdomains),
         JsLibraryCheck(vulns),
         PhpVersionCheck(),
+        WordPressCheck(),
         OpenPortsCheck(),
     ]
 
