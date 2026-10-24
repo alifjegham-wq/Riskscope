@@ -52,11 +52,16 @@
   <h2>What it looks for</h2>
   <p>Websites: encryption and certificate quality (expiry, weak keys, SHA-1 signatures), browser security
     headers and Content-Security-Policy weaknesses, deprecated/risky headers (HPKP, Expect-CT), mixed
-    content, cookies, CORS, email spoofing protection (SPF/DMARC) and DNS hardening, subdomain takeover,
-    exposed files and admin tools (.git, .env, database dumps, phpMyAdmin and more), leaked cloud and CI
-    credentials (Kubernetes, Terraform state, Spring Boot Actuator, npm tokens), exposed Vite dev servers,
-    outdated JavaScript libraries, the PHP version against critical advisories, and common WordPress
-    exposures. Code: dependencies with known vulnerabilities and hard-coded secrets.</p>
+    content, missing Subresource Integrity on third-party scripts, dangerous HTTP methods (TRACE and
+    unauthenticated write verbs), cookies, CORS, email spoofing protection (SPF/DMARC) and DNS hardening,
+    subdomain takeover, exposed files and admin tools (.git, .env, database dumps, SSH keys, web.config,
+    API schemas, phpMyAdmin and more), leaked cloud and CI credentials (Kubernetes, Terraform state,
+    Spring Boot Actuator, npm tokens), exposed Vite dev servers, outdated JavaScript libraries, the PHP
+    version against critical advisories, and common WordPress exposures. Code: dependencies with known
+    vulnerabilities and hard-coded secrets.</p>
+  <p>You can pick a <strong>scan profile</strong> to narrow a scan (for example headers and encryption only,
+    or just exposed files) so large or repeated scans finish faster. A profile only restricts which checks
+    run; it never makes a scan reach further than a full scan would.</p>
   <h2>Limits</h2>
   <p>An external scan can't see everything: business-logic flaws, server-side injection bugs and internal
     misconfigurations need an authenticated test or code review. A good grade is a healthy baseline, not a

@@ -309,6 +309,77 @@ PROBES: tuple[Probe, ...] = (
         "output; keep the dev server bound to localhost.",
         references=("https://nvd.nist.gov/vuln/detail/CVE-2026-39364",),
     ),
+    # --- Keys, server config and source history ---
+    Probe(
+        "/.ssh/id_rsa",
+        "Private SSH key is public",
+        Severity.CRITICAL,
+        "A private SSH key gives an attacker login access to whatever servers trust it.",
+        _text(r"BEGIN (?:RSA|OPENSSH|EC|DSA|PGP) PRIVATE KEY"),
+        fix="Remove the key from the web root and rotate it (generate a new keypair) immediately.",
+    ),
+    Probe(
+        "/id_rsa",
+        "Private SSH key is public",
+        Severity.CRITICAL,
+        "A private SSH key gives an attacker login access to whatever servers trust it.",
+        _text(r"BEGIN (?:RSA|OPENSSH|EC|DSA|PGP) PRIVATE KEY"),
+        fix="Remove the key from the web root and rotate it (generate a new keypair) immediately.",
+    ),
+    Probe(
+        "/web.config",
+        "IIS web.config is public",
+        Severity.HIGH,
+        "web.config often holds connection strings, machine keys and app settings in clear text.",
+        _text(r"<configuration\b|<connectionStrings\b|<machineKey\b"),
+        fix="Block web.config in the server config (IIS normally does; a misconfigured proxy may not). "
+        "Rotate any secrets it exposed.",
+    ),
+    Probe(
+        "/.git/logs/HEAD",
+        "Git history log is public",
+        Severity.MEDIUM,
+        "The reflog reveals commit hashes and committer names/emails, and helps reconstruct the repo even "
+        "when /.git/HEAD is blocked.",
+        _text(r"(?m)^[0-9a-f]{40} [0-9a-f]{40} "),
+    ),
+    Probe(
+        "/config.php.bak",
+        "PHP config backup is public",
+        Severity.HIGH,
+        "Editor/backup copies of config.php are served as source, revealing database and app credentials.",
+        _text(r"<\?php"),
+    ),
+    Probe(
+        "/config.php~",
+        "PHP config backup is public",
+        Severity.HIGH,
+        "Editor/backup copies of config.php are served as source, revealing database and app credentials.",
+        _text(r"<\?php"),
+    ),
+    Probe(
+        "/sftp-config.json",
+        "Sublime SFTP config (with credentials) is public",
+        Severity.HIGH,
+        "This editor config usually contains the deploy host, username and password or key path.",
+        _text(r'"(?:password|host|user|remote_path)"'),
+    ),
+    Probe(
+        "/swagger.json",
+        "API schema (Swagger/OpenAPI) is public",
+        Severity.LOW,
+        "A public API schema maps every endpoint and parameter, which makes targeted attacks much easier.",
+        _text(r'"(?:swagger|openapi)"\s*:'),
+        fix="Serve API docs only to authenticated users, or remove them from production.",
+    ),
+    Probe(
+        "/openapi.json",
+        "API schema (Swagger/OpenAPI) is public",
+        Severity.LOW,
+        "A public API schema maps every endpoint and parameter, which makes targeted attacks much easier.",
+        _text(r'"(?:swagger|openapi)"\s*:'),
+        fix="Serve API docs only to authenticated users, or remove them from production.",
+    ),
 )
 
 

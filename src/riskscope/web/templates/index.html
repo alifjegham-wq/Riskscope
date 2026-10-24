@@ -19,6 +19,11 @@
     <div class="row">
       <input id="target" name="target" type="text" placeholder="example.com, 203.0.113.10 or 203.0.113.0/24"
              value="{{ target or '' }}" required autocomplete="url">
+      <select name="profile" aria-label="Scan profile">
+        {% for value, label in profiles.items() %}
+        <option value="{{ value }}"{% if (profile or default_profile) == value %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
       <button type="submit">Scan</button>
     </div>
     <label class="check"><input type="checkbox" name="deep" value="true">

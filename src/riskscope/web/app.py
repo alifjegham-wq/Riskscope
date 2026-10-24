@@ -22,7 +22,15 @@ from fastapi.templating import Jinja2Templates
 
 from ..appscan import UploadError, expand_upload, scan_code
 from ..appscan.osv import OsvClient, VulnSource
-from ..checks import Check, ScanContext, default_checks
+from ..checks import (
+    DEFAULT_PROFILE,
+    PROFILE_LABELS,
+    Check,
+    ScanContext,
+    default_checks,
+    normalize_profile,
+    select_checks,
+)
 from ..checks.base import DnsLookup, ExistsLookup, system_dns, system_exists
 from ..config import Settings
 from ..ipscan import (
@@ -138,12 +146,16 @@ class Services:
     async def verified(self, target: Target) -> bool:
         return await is_verified(target, self.settings.verify_secret, self.dns, SafeFetcher(self.http, self.resolver))
 
-    async def scan(self, target: Target, want_active: bool) -> Report:
-        """Website scan; active checks run only if asked for and ownership verifies right now."""
+    async def scan(self, target: Target, want_active: bool, profile: str = DEFAULT_PROFILE) -> Report:
+        """Website scan; active checks run only if asked for and ownership verifies right now.
+
+        `profile` only narrows which registered checks run (never widens), so it cannot make a scan
+        touch anything the full scan would not.
+        """
         fetcher = SafeFetcher(self.http, self.resolver)
         verified = want_active and await is_verified(target, self.settings.verify_secret, self.dns, fetcher)
         ctx = ScanContext(target=target, fetcher=fetcher, dns=self.dns, exists=self.exists, verified_owner=verified)
-        return await scan_website(ctx, self.checks)
+        return await scan_website(ctx, select_checks(self.checks, profile))
 
     async def ip_scan(self, raw: str) -> IpScanResult:
         """Find the site(s) hosted on an IP or CIDR block and scan each (passive checks only)."""
@@ -307,12 +319,14 @@ def create_app(
         if not svc(request).limiter.allow(client_ip(request)):
             raise HTTPException(429, "Scan limit reached for this hour. Please try again later.")
 
-    async def run_site_scan(request: Request, raw_target: str, deep: bool) -> tuple[Target, Report | None]:
+    async def run_site_scan(
+        request: Request, raw_target: str, deep: bool, profile: str = DEFAULT_PROFILE
+    ) -> tuple[Target, Report | None]:
         s = svc(request)
         target = parse_target(raw_target)
         if deep and not await s.verified(target):
             return target, None
-        return target, await s.scan(target, deep)
+        return target, await s.scan(target, deep, profile)
 
     def page(request: Request, name: str, status: int = 200, **ctx: object) -> HTMLResponse:
         return templates.TemplateResponse(
@@ -324,6 +338,8 @@ def create_app(
                 "share_ttl_days": svc(request).settings.share_ttl_days,
                 "monitoring_enabled": svc(request).monitoring_enabled,
                 "sharing_enabled": svc(request).sharing_enabled,
+                "profiles": PROFILE_LABELS,
+                "default_profile": DEFAULT_PROFILE,
                 **ctx,
             },
             status_code=status,
@@ -348,16 +364,18 @@ def create_app(
         target: Annotated[str, Form()],
         deep: Annotated[bool, Form()] = False,
         share: Annotated[bool, Form()] = False,
+        profile: Annotated[str, Form()] = DEFAULT_PROFILE,
     ) -> HTMLResponse:
+        profile = normalize_profile(profile)
         try:
             check_rate(request)
             if looks_like_ip_target(target):
                 return page(request, "ip_scan.html", result=await svc(request).ip_scan(target))
-            parsed, report = await run_site_scan(request, target, deep)
+            parsed, report = await run_site_scan(request, target, deep, profile)
         except UnsafeTargetError as exc:
-            return page(request, "index.html", 400, error=str(exc), target=target)
+            return page(request, "index.html", 400, error=str(exc), target=target, profile=profile)
         except HTTPException as exc:
-            return page(request, "index.html", exc.status_code, error=exc.detail, target=target)
+            return page(request, "index.html", exc.status_code, error=exc.detail, target=target, profile=profile)
         if report is None:
             return verify_page(request, parsed, failed=True)
         if share and svc(request).sharing_enabled:
@@ -633,12 +651,14 @@ def create_app(
         return await svc(request).share(report)
 
     @app.get("/api/scan")
-    async def api_scan(request: Request, target: str, deep: bool = False, share: bool = False) -> Report:
+    async def api_scan(
+        request: Request, target: str, deep: bool = False, share: bool = False, profile: str = DEFAULT_PROFILE
+    ) -> Report:
         check_rate(request)
         if looks_like_ip_target(target):
             raise HTTPException(400, "This looks like an IP address or CIDR block; use /api/ip-scan instead")
         try:
-            parsed, report = await run_site_scan(request, target, deep)
+            parsed, report = await run_site_scan(request, target, deep, normalize_profile(profile))
         except UnsafeTargetError as exc:
             raise HTTPException(400, str(exc)) from exc
         if report is None:

@@ -3,11 +3,14 @@ import time
 import httpx
 
 from riskscope.appscan.osv import Vuln
+from riskscope.checks import PROFILES, default_checks, normalize_profile, select_checks
+from riskscope.checks.content import SubresourceIntegrityCheck
 from riskscope.checks.cookies import CookieCheck
 from riskscope.checks.dns_email import DnsHardeningCheck, EmailAuthCheck
 from riskscope.checks.exposure import ExposedFilesCheck, SecurityTxtCheck
 from riskscope.checks.headers import CORS_PROBE_ORIGIN, CorsCheck, HttpsRedirectCheck, SecurityHeadersCheck
 from riskscope.checks.libraries import JsLibraryCheck, detect_libraries
+from riskscope.checks.methods import HttpMethodsCheck
 from riskscope.checks.ports import OpenPortsCheck
 from riskscope.checks.tls import TlsCheck, TlsInfo
 from riskscope.models import Finding, Severity
@@ -252,6 +255,70 @@ async def test_coop_and_deprecated_headers() -> None:
 async def test_safe_x_xss_protection_zero_is_not_flagged() -> None:
     h = {**GOOD_HEADERS, "x-xss-protection": "0"}
     assert await SecurityHeadersCheck().run(make_ctx(site({"/": httpx.Response(200, headers=h)}))) == []
+
+
+async def test_sri_flags_unhashed_third_party_scripts() -> None:
+    html = (
+        '<script src="https://cdn.jsdelivr.net/npm/x.js"></script>'
+        '<script src="https://code.jquery.com/jquery.js" integrity="sha384-abc" crossorigin></script>'
+        '<script src="/local.js"></script>'
+        '<script src="https://example.com/own.js"></script>'
+    )
+    [f] = await SubresourceIntegrityCheck().run(make_ctx(site({"/": httpx.Response(200, text=html)})))
+    assert f.id == "content.sri.missing" and f.severity is Severity.LOW
+    assert "cdn.jsdelivr.net" in f.evidence
+    assert "code.jquery.com" not in f.evidence  # already has an integrity hash
+    assert "own.js" not in f.evidence  # same origin needs no SRI
+
+
+async def test_sri_clean_when_hashed_or_local() -> None:
+    html = '<script src="/a.js"></script><script src="https://cdn.x.com/b.js" integrity="sha384-z"></script>'
+    assert await SubresourceIntegrityCheck().run(make_ctx(site({"/": httpx.Response(200, text=html)}))) == []
+
+
+async def test_http_methods_trace_and_write_verbs() -> None:
+    ctx = make_ctx(site({"/": httpx.Response(200, headers={"allow": "GET, POST, TRACE, DELETE"})}))
+    assert ids(await HttpMethodsCheck().run(ctx)) == {"methods.trace", "methods.write_verbs"}
+
+
+async def test_http_methods_clean() -> None:
+    ctx = make_ctx(site({"/": httpx.Response(200, headers={"allow": "GET, HEAD, POST, OPTIONS"})}))
+    assert await HttpMethodsCheck().run(ctx) == []
+
+
+async def test_exposed_keys_config_and_schema_probes() -> None:
+    routes = {
+        "/.ssh/id_rsa": httpx.Response(200, text="-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNz\n"),
+        "/web.config": httpx.Response(200, text="<configuration><connectionStrings/></configuration>"),
+        "/.git/logs/HEAD": httpx.Response(
+            200, text="0000000000000000000000000000000000000000 " + "1" * 40 + " Dev <d@e> 1600000000 +0000\tcommit\n"
+        ),
+        "/config.php.bak": httpx.Response(200, text="<?php $db_password = 'secret';"),
+        "/sftp-config.json": httpx.Response(200, text='{"host":"h","user":"u","password":"p"}'),
+        "/swagger.json": httpx.Response(200, text='{"openapi":"3.0.0","paths":{}}'),
+        "/": httpx.Response(200, text="<html>home</html>"),
+    }
+    found = {f.id: f for f in await ExposedFilesCheck().run(make_ctx(site(routes)))}
+    assert "exposure..ssh.id_rsa" in found and found["exposure..ssh.id_rsa"].severity is Severity.CRITICAL
+    assert "exposure.web.config" in found and found["exposure.web.config"].severity is Severity.HIGH
+    assert "exposure..git.logs.HEAD" in found
+    assert "exposure.config.php.bak" in found
+    assert "exposure.sftp-config.json" in found
+    assert "exposure.swagger.json" in found and found["exposure.swagger.json"].severity is Severity.LOW
+
+
+def test_scan_profiles_only_narrow_never_widen() -> None:
+    checks = default_checks(FakeVulns())
+    names = {c.name for c in checks}
+    assert {c.name for c in select_checks(checks, "full")} == names
+    quick = {c.name for c in select_checks(checks, "quick")}
+    assert "tls" in quick and "exposed_files" not in quick and quick < names
+    assert {c.name for c in select_checks(checks, "bogus")} == names  # unknown -> full
+    assert normalize_profile("nope") == "full"
+    # Every profile must reference only real check names (guards against typos).
+    for profile, selected in PROFILES.items():
+        if selected is not None:
+            assert selected <= names, profile
 
 
 async def test_tls_certificate_quality() -> None:
