@@ -5,12 +5,17 @@
 # visitors (the next visit takes up to a minute to wake it) and its disk is wiped on every restart, so
 # shareable links and monitoring are switched off (RISKSCOPE_PERSISTENT_STORAGE=false).
 #
-# To unlock sharing and monitoring later (paid): set plan to "starter", add the disk block below,
-# set RISKSCOPE_PERSISTENT_STORAGE to "true", and add the SMTP variables from docs/DEPLOY.md.
-#    disk:
-#      name: riskscope-data
-#      mountPath: /data
-#      sizeGB: 1
+# To unlock sharing and monitoring (paid), make all four changes below, then add the SMTP variables
+# (see docs/DEPLOY.md). Monitoring also needs the database on the persistent disk, or monitors and
+# groups are still lost on restart.
+#   1. plan: starter
+#   2. add this disk block under the service:
+#        disk:
+#          name: riskscope-data
+#          mountPath: /data
+#          sizeGB: 1
+#   3. RISKSCOPE_PERSISTENT_STORAGE: "true"
+#   4. RISKSCOPE_DATABASE_PATH: "/data/riskscope.db"   # must live on the mounted disk
 services:
   - type: web
     name: riskscope
@@ -32,3 +37,16 @@ services:
         value: "*"
       - key: RISKSCOPE_SCANS_PER_HOUR
         value: "20"
+      # --- Email for monitoring (only used once persistent storage is on, above) ---
+      # Add these from your SMTP provider (Brevo, Resend, Postmark, Mailgun all have free tiers).
+      # Use sync: false so the secrets are entered in the Render dashboard, never committed here.
+      # - key: RISKSCOPE_SMTP_HOST
+      #   sync: false
+      # - key: RISKSCOPE_SMTP_PORT
+      #   value: "587"
+      # - key: RISKSCOPE_SMTP_USERNAME
+      #   sync: false
+      # - key: RISKSCOPE_SMTP_PASSWORD
+      #   sync: false
+      # - key: RISKSCOPE_SMTP_FROM
+      #   value: "riskscope <alerts@yourdomain.com>"
