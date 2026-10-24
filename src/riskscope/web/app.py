@@ -642,6 +642,14 @@ def create_app(
     async def offline(request: Request) -> HTMLResponse:
         return page(request, "offline.html")
 
+    @app.get("/acceptable-use", response_class=HTMLResponse)
+    async def acceptable_use(request: Request) -> HTMLResponse:
+        return page(request, "acceptable-use.html")
+
+    @app.get("/privacy", response_class=HTMLResponse)
+    async def privacy(request: Request) -> HTMLResponse:
+        return page(request, "privacy.html")
+
     @app.get("/healthz")
     async def healthz() -> JSONResponse:
         return JSONResponse({"ok": True})
