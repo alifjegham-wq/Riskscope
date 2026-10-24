@@ -1,23 +1,29 @@
 # One-click deploy on Render: https://render.com/deploy?repo=https://github.com/alifjegham-wq/Riskscope
 # See docs/DEPLOY.md for the step-by-step (works from a phone browser).
+#
+# This uses Render's FREE instance type: scans work, but the instance sleeps after 15 minutes without
+# visitors (the next visit takes up to a minute to wake it) and its disk is wiped on every restart, so
+# shareable links and monitoring are switched off (RISKSCOPE_PERSISTENT_STORAGE=false).
+#
+# To unlock sharing and monitoring later (paid): set plan to "starter", add the disk block below,
+# set RISKSCOPE_PERSISTENT_STORAGE to "true", and add the SMTP variables from docs/DEPLOY.md.
+#    disk:
+#      name: riskscope-data
+#      mountPath: /data
+#      sizeGB: 1
 services:
   - type: web
     name: riskscope
     runtime: docker
-    # A persistent disk (for shared reports and monitors) needs a paid instance type.
-    # For a scan-only trial, change this to "free" and delete the disk block below:
-    # sharing and monitoring then reset on every restart and the free instance sleeps when idle.
-    plan: starter
+    plan: free
     healthCheckPath: /healthz
     autoDeploy: true
-    disk:
-      name: riskscope-data
-      mountPath: /data
-      sizeGB: 1
     envVars:
-      # HMAC key for ownership and monitor tokens. Generated once; never change it afterwards.
+      # HMAC key for ownership tokens. Generated once; never change it afterwards.
       - key: RISKSCOPE_VERIFY_SECRET
         generateValue: true
+      - key: RISKSCOPE_PERSISTENT_STORAGE
+        value: "false"
       # Render's proxy puts the real visitor IP first in X-Forwarded-For (used for rate limiting),
       # and uvicorn must trust its forwarded headers to know requests arrived over https.
       - key: RISKSCOPE_TRUST_PROXY
@@ -26,19 +32,3 @@ services:
         value: "*"
       - key: RISKSCOPE_SCANS_PER_HOUR
         value: "20"
-      # Leave the public URL empty to use Render's own https://<name>.onrender.com address.
-      # Set it if you add a custom domain.
-      - key: RISKSCOPE_PUBLIC_BASE_URL
-        sync: false
-      # Email for monitoring alerts. Until RISKSCOPE_SMTP_HOST is set, the monitoring sign-up stays hidden
-      # and the site offers one-off scans and shareable reports only.
-      - key: RISKSCOPE_SMTP_HOST
-        sync: false
-      - key: RISKSCOPE_SMTP_PORT
-        value: "587"
-      - key: RISKSCOPE_SMTP_USERNAME
-        sync: false
-      - key: RISKSCOPE_SMTP_PASSWORD
-        sync: false
-      - key: RISKSCOPE_SMTP_FROM
-        sync: false

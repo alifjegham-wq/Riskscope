@@ -123,6 +123,7 @@ sent, so you can follow the links locally.
 | `RISKSCOPE_MAX_UPLOAD_MB` | 20 | Upload size limit |
 | `RISKSCOPE_TRUST_PROXY` | false | Take the client IP from `X-Forwarded-For` (only behind your own proxy) |
 | `RISKSCOPE_PUBLIC_BASE_URL` | `http://127.0.0.1:8000` | Absolute URL used in share links and emails |
+| `RISKSCOPE_PERSISTENT_STORAGE` | true | Set to false on hosts whose disk is wiped on restart: hides shareable links and monitoring |
 | `RISKSCOPE_DATABASE_PATH` | `riskscope.db` (`/data/riskscope.db` in Docker) | SQLite file for shared reports and monitors |
 | `RISKSCOPE_SHARE_TTL_DAYS` | 30 | Lifetime of shared reports and of monitor scan history |
 | `RISKSCOPE_SCHEDULER_ENABLED` | true | Run the re-scan loop inside the web process |
@@ -134,10 +135,18 @@ sent, so you can follow the links locally.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/alifjegham-wq/Riskscope)
 
-The quickest way to put riskscope online is the Render blueprint (`render.yaml`). **[docs/DEPLOY.md](docs/DEPLOY.md)**
-walks through it step by step, from a phone browser if you like, including email setup for monitoring. On a
-public server without SMTP settings the monitoring sign-up stays hidden. The public URL defaults to the
-platform's own (`RENDER_EXTERNAL_URL`), and the container listens on `$PORT`.
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/alifjegham-wq/Riskscope)
+
+Two free ways to run it, both from a phone browser. **[docs/DEPLOY.md](docs/DEPLOY.md)** has the steps:
+
+- **GitHub Codespaces** gives you a private copy. The `.devcontainer` installs and starts riskscope automatically.
+- **Render's free plan** (`render.yaml`) gives you a public site. It sleeps when idle and its disk is wiped on
+  restart, so it runs with `RISKSCOPE_PERSISTENT_STORAGE=false`, which hides shareable links and monitoring.
+  The guide covers upgrading to a paid plan with a disk and email.
+
+riskscope is also an **installable web app (PWA)**: "Add to Home Screen" on iPhone, "Install app" on Android.
+The public URL defaults to the platform's own (`RENDER_EXTERNAL_URL`, or the Codespaces forwarded address),
+and the container listens on `$PORT`.
 
 Any other Docker host works too:
 

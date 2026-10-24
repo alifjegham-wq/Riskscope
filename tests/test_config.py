@@ -23,3 +23,12 @@ def test_explicit_url_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://riskscope.onrender.com")
     monkeypatch.setenv("RISKSCOPE_PUBLIC_BASE_URL", "https://scan.example.org")
     assert Settings(_env_file=None).public_base_url == "https://scan.example.org"
+
+
+def test_codespaces_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    monkeypatch.delenv("RISKSCOPE_PUBLIC_BASE_URL", raising=False)
+    monkeypatch.setenv("CODESPACE_NAME", "fluffy-spoon-x7")
+    monkeypatch.setenv("GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN", "app.github.dev")
+    s = Settings(_env_file=None)
+    assert s.public_base_url == "https://fluffy-spoon-x7-8000.app.github.dev" and not s.is_local
