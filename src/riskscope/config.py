@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # ---- scanning by IP / CIDR ---------------------------------------------
     #: Largest CIDR block (number of addresses) one request may enumerate.
     max_cidr_hosts: int = 256
+    #: Most domains one bulk "scan my assets" request will accept (each must pass ownership verification).
+    max_bulk_targets: int = 25
     #: Most distinct sites one IP/CIDR request will actually scan.
     max_ip_sites: int = 10
     #: Passive-DNS provider for reverse-IP lookups: "none" (default) or "hackertarget".
