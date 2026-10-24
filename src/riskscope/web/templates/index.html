@@ -17,8 +17,10 @@
     </div>
     <label class="check"><input type="checkbox" name="deep" value="true">
       Include active checks (open ports). Requires proving you own the domain.</label>
+    {% if sharing_enabled %}
     <label class="check"><input type="checkbox" name="share" value="true">
       Create a shareable link to the report (private link, expires after {{ share_ttl_days }} days, you can delete it).</label>
+    {% endif %}
   </form>
   <p class="muted">Checks HTTPS &amp; certificates, security headers, cookies, CORS, SPF/DMARC email spoofing
     protection, DNS hardening, subdomain takeover, exposed files (.git, .env, backups) and outdated JavaScript libraries. Enter an <strong>IP address or CIDR block</strong> and riskscope finds the site(s) hosted there (via reverse DNS and TLS certificates) and scans each.</p>
@@ -45,8 +47,10 @@
       <input id="files" name="files" type="file" multiple required>
       <button type="submit">Scan code</button>
     </div>
+    {% if sharing_enabled %}
     <label class="check"><input type="checkbox" name="share" value="true">
       Create a shareable link to the report. Secrets stay masked; file names are visible.</label>
+    {% endif %}
   </form>
   <p class="muted">Finds dependencies with known vulnerabilities (npm, PyPI, Go, Packagist, RubyGems, crates.io via
     <a href="https://osv.dev">OSV.dev</a>) and hard-coded secrets such as API keys and private keys.</p>

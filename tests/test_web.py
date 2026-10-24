@@ -253,3 +253,63 @@ def test_public_server_without_smtp_hides_monitoring() -> None:
 def test_local_server_keeps_monitoring_with_logged_email() -> None:
     with make_client() as c:  # injected mailer counts as configured
         assert "Keep watching your site" in c.get("/").text
+
+
+def _client(settings: Settings, mailer: LogMailer | None = None) -> TestClient:
+    upstream = httpx.AsyncClient(transport=httpx.MockTransport(site({"/": httpx.Response(200, text="hi")})))
+    return TestClient(
+        create_app(
+            settings,
+            http=upstream,
+            vulns=FakeVulns(),
+            resolver=public_resolver,
+            dns=_verified_dns(),
+            checks=[SecurityHeadersCheck()],
+            mailer=mailer,
+        )
+    )
+
+
+def test_ephemeral_storage_hides_sharing_and_monitoring() -> None:
+    settings = Settings(
+        verify_secret=SECRET,
+        database_path=":memory:",
+        scheduler_enabled=False,
+        persistent_storage=False,
+        smtp_host="smtp.example.org",
+    )
+    with _client(settings, LogMailer()) as c:
+        home = c.get("/").text
+        assert 'name="share"' not in home and "Keep watching your site" not in home
+        r = c.post("/scan", data={"target": "example.com", "share": "true"})
+        assert r.status_code == 200 and "Shareable link" not in r.text and "Set up monitoring" not in r.text
+        assert c.get("/api/scan", params={"target": "example.com", "share": True}).status_code == 503
+        assert c.get("/api/scan", params={"target": "example.com"}).status_code == 200
+        assert c.get("/monitor", params={"target": "example.com"}).status_code == 503
+        store = c.app.state.services.store  # type: ignore[attr-defined]
+        assert store._db.execute("SELECT COUNT(*) FROM reports").fetchone()[0] == 0
+
+
+def test_installable_app_assets() -> None:
+    with make_client() as c:
+        home = c.get("/")
+        assert '<link rel="manifest" href="/manifest.webmanifest">' in home.text
+        assert '<script src="/static/app.js" defer></script>' in home.text
+        csp = home.headers["content-security-policy"]
+        for directive in ("script-src 'self'", "manifest-src 'self'", "worker-src 'self'", "connect-src 'self'"):
+            assert directive in csp
+        assert "unsafe-inline" not in csp
+
+        m = c.get("/manifest.webmanifest")
+        assert m.headers["content-type"].startswith("application/manifest+json")
+        manifest = m.json()
+        assert manifest["display"] == "standalone" and manifest["start_url"] == "/"
+        for icon in manifest["icons"]:
+            assert c.get(icon["src"]).status_code == 200
+        assert any(i.get("purpose") == "maskable" for i in manifest["icons"])
+
+        sw = c.get("/sw.js")
+        assert sw.status_code == 200 and sw.headers["content-type"].startswith("text/javascript")
+        assert "caches" in sw.text and sw.headers["cache-control"] == "no-cache"
+        assert "You're offline" in c.get("/offline").text.replace("&#39;", "'")
+        assert c.get("/static/apple-touch-icon.png").status_code == 200

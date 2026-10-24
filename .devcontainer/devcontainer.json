@@ -1,0 +1,18 @@
+// GitHub Codespaces / dev container: open the repo in a Codespace (works from a phone browser) and
+// riskscope starts by itself. The forwarded port opens in a new tab; it's private to you by default.
+{
+  "name": "riskscope",
+  "image": "mcr.microsoft.com/devcontainers/python:3.13",
+  "hostRequirements": { "cpus": 2 },
+  "postCreateCommand": "pip install --user --quiet uv && ~/.local/bin/uv sync --frozen",
+  // Start (or restart) the web app every time the Codespace starts; logs go to /tmp/riskscope.log.
+  "postStartCommand": "bash -c 'nohup ~/.local/bin/uv run --frozen uvicorn riskscope.web.app:create_app --factory --host 0.0.0.0 --port 8000 > /tmp/riskscope.log 2>&1 &'",
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": { "label": "riskscope", "onAutoForward": "openBrowser" }
+  },
+  "customizations": {
+    "codespaces": { "openFiles": ["docs/DEPLOY.md"] },
+    "vscode": { "extensions": ["ms-python.python", "charliermarsh.ruff"] }
+  }
+}

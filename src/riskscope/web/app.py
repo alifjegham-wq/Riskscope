@@ -16,7 +16,7 @@ from typing import Annotated, TypedDict
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -54,8 +54,8 @@ templates.env.filters["datetime"] = lambda ts: time.strftime("%Y-%m-%d %H:%M UTC
 # Our own pages must pass our own scanner.
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
-        "default-src 'none'; style-src 'self'; img-src 'self' data:; form-action 'self'; "
-        "base-uri 'none'; frame-ancestors 'none'"
+        "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
+        "manifest-src 'self'; worker-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
     ),
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "X-Content-Type-Options": "nosniff",
@@ -99,6 +99,8 @@ class Services:
     #: Monitoring needs working email. On a public server without SMTP the sign-up is hidden, because
     #: confirmation emails would only reach the server log. Locally the log is how you follow the links.
     monitoring_enabled: bool = True
+    #: Shareable links need storage that survives restarts.
+    sharing_enabled: bool = True
 
     @property
     def base_url(self) -> str:
@@ -190,7 +192,9 @@ def create_app(
             mailer=mail,
             passive=passive_src,
             cert_probe=cert_probe,
-            monitoring_enabled=bool(settings.smtp_host) or mailer is not None or settings.is_local,
+            monitoring_enabled=settings.persistent_storage
+            and (bool(settings.smtp_host) or mailer is not None or settings.is_local),
+            sharing_enabled=settings.persistent_storage,
         )
         scheduler = Scheduler(
             store=store,
@@ -258,6 +262,7 @@ def create_app(
                 "max_upload_mb": svc(request).settings.max_upload_mb,
                 "share_ttl_days": svc(request).settings.share_ttl_days,
                 "monitoring_enabled": svc(request).monitoring_enabled,
+                "sharing_enabled": svc(request).sharing_enabled,
                 **ctx,
             },
             status_code=status,
@@ -294,7 +299,7 @@ def create_app(
             return page(request, "index.html", exc.status_code, error=exc.detail, target=target)
         if report is None:
             return verify_page(request, parsed, failed=True)
-        if share:
+        if share and svc(request).sharing_enabled:
             report = await svc(request).share(report)
         return page(request, "report.html", report=report)
 
@@ -327,7 +332,7 @@ def create_app(
             msg = exc.detail if isinstance(exc, HTTPException) else str(exc)
             status = exc.status_code if isinstance(exc, HTTPException) else 400
             return page(request, "index.html", status, code_error=msg)
-        if share:
+        if share and svc(request).sharing_enabled:
             report = await svc(request).share(report)
         return page(request, "report.html", report=report)
 
@@ -530,6 +535,13 @@ def create_app(
 
     # ---- JSON API ------------------------------------------------------------
 
+    async def share_or_plain(request: Request, report: Report, share: bool) -> Report:
+        if not share:
+            return report
+        if not svc(request).sharing_enabled:
+            raise HTTPException(503, "Shareable links are disabled on this server (no persistent storage)")
+        return await svc(request).share(report)
+
     @app.get("/api/scan")
     async def api_scan(request: Request, target: str, deep: bool = False, share: bool = False) -> Report:
         check_rate(request)
@@ -546,7 +558,7 @@ def create_app(
                 f"Ownership not verified. Publish TXT {DNS_LABEL}.{parsed.registrable_hint} = {token} "
                 f"or serve it at {parsed.url + WELL_KNOWN_PATH}",
             )
-        return await svc(request).share(report) if share else report
+        return await share_or_plain(request, report, share)
 
     @app.post("/api/code")
     async def api_code(
@@ -557,7 +569,7 @@ def create_app(
             report = await _scan_uploads(request, files)
         except UploadError as exc:
             raise HTTPException(400, str(exc)) from exc
-        return await svc(request).share(report) if share else report
+        return await share_or_plain(request, report, share)
 
     @app.get("/api/ip-scan")
     async def api_ip_scan(request: Request, target: str) -> JSONResponse:
@@ -589,6 +601,46 @@ def create_app(
         if stored is None:
             raise HTTPException(404, "Report not found or expired")
         return stored.report
+
+    # ---- installable app (PWA) -----------------------------------------------
+
+    @app.get("/manifest.webmanifest", include_in_schema=False)
+    async def manifest() -> JSONResponse:
+        return JSONResponse(
+            {
+                "name": "riskscope: free security scanner",
+                "short_name": "riskscope",
+                "description": "Scan websites and code for security risks and get a prioritised list of fixes.",
+                "start_url": "/",
+                "scope": "/",
+                "display": "standalone",
+                "background_color": "#f6f7f9",
+                "theme_color": "#2457d6",
+                "icons": [
+                    {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                    {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"},
+                    {
+                        "src": "/static/icon-maskable-512.png",
+                        "sizes": "512x512",
+                        "type": "image/png",
+                        "purpose": "maskable",
+                    },
+                    {"src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml"},
+                ],
+            },
+            media_type="application/manifest+json",
+        )
+
+    @app.get("/sw.js", include_in_schema=False)
+    async def service_worker() -> FileResponse:
+        # Served from the root so the worker's scope covers the whole site.
+        return FileResponse(
+            HERE / "static" / "sw.js", media_type="text/javascript", headers={"Cache-Control": "no-cache"}
+        )
+
+    @app.get("/offline", response_class=HTMLResponse, include_in_schema=False)
+    async def offline(request: Request) -> HTMLResponse:
+        return page(request, "offline.html")
 
     @app.get("/healthz")
     async def healthz() -> JSONResponse:
