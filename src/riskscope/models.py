@@ -72,6 +72,9 @@ class Report(BaseModel):
     grade: str = "A"
     risk_level: str = "Low"
     verified_owner: bool = False
+    #: Set only in responses for scans the user chose to share; never stored with the report.
+    share_url: str | None = None
+    delete_url: str | None = None
 
     def sorted_findings(self) -> list[Finding]:
         return sorted(self.findings, key=lambda f: (f.severity.rank, f.category, f.id))

@@ -25,8 +25,15 @@
     well-known file paths, and read public DNS. Anyone can run them on any public site.</p>
   <p>Active checks (currently: probing for risky open ports such as databases and RDP) only run after you prove
     ownership with a DNS record or a file on the site.</p>
+  <h2>Monitoring</h2>
+  <p>Site owners can have riskscope re-scan daily or weekly. We email only when something gets worse: a new
+    medium-or-higher issue, a finding whose severity went up (for example a certificate moving from 30 to 14 days
+    from expiry), or a lower grade. Monitoring needs proof of ownership and a click on a confirmation email, so
+    nobody can point it at someone else's site or inbox. Every email has a one-click unsubscribe.</p>
   <h2>Privacy</h2>
-  <p>Scan results aren't stored. Uploaded code is processed in memory and discarded; only package names and
+  <p>Scan results aren't stored unless you ask: ticking "Create a shareable link" saves that one report behind an
+    unguessable link that expires (you get a private delete link), and monitoring keeps your scan history until
+    you stop it. Shared pages are hidden from search engines. Uploaded code is processed in memory and discarded; only package names and
     versions are sent to OSV.dev to look up vulnerabilities. Secrets found in code are masked in the report.</p>
   <h2>Limits</h2>
   <p>An external scan can't see everything: business-logic flaws, server-side injection bugs and internal

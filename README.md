@@ -41,6 +41,34 @@ To verify ownership, publish a TXT record at `_riskscope-challenge.<domain>` or 
 
 Uploads are processed in memory and never stored. Only package names and versions leave the server (to OSV.dev).
 
+### Shareable reports (opt-in)
+
+Tick **Create a shareable link** (or pass `share=true` to the API) and the report is saved behind an
+unguessable link (`/r/<id>`, 128-bit id) that expires after `RISKSCOPE_SHARE_TTL_DAYS` (30 by default). The creator
+also gets a private delete link, shown once; only its SHA-256 is stored. Shared pages send
+`X-Robots-Tag: noindex` and `Cache-Control: no-store`. Scans that aren't shared are never written anywhere.
+For code scans, secrets stay masked but file names are visible.
+
+### Scheduled re-scans (monitoring)
+
+Owners can have a site re-scanned **daily or weekly** and get an email only when it gets worse:
+
+* a new medium, high or critical finding;
+* a finding whose severity rose (e.g. a certificate moving from "expires in 30 days" to "expires in 14 days");
+* a lower grade;
+* the site couldn't be reached 3 times in a row.
+
+The first run sends a "monitoring started" summary. Each run is saved as a report, so the monitor's manage page
+shows the grade history with links to every scan.
+
+Abuse protections: setting up a monitor requires the same **ownership verification** as active checks (it's
+re-checked on every run, and active checks are only included while it still passes). It also requires
+**email confirmation**: the link opens a page with an "Activate" button, because mail scanners that prefetch
+links must not be able to switch it on. Unconfirmed requests are deleted after 7 days. There's a per-address
+limit (`RISKSCOPE_MAX_MONITORS_PER_EMAIL`), and every email carries an RFC 8058 one-click `List-Unsubscribe`.
+Each monitor's manage link holds an HMAC of its id under `RISKSCOPE_VERIFY_SECRET`, so a database leak alone
+doesn't give unsubscribe rights.
+
 ## Scoring
 
 Start at 100 and subtract per finding: critical 40, high 20, medium 8, low 3, info 0. A second finding in the same
@@ -61,23 +89,45 @@ JSON API (interactive docs at `/api/docs`):
 curl 'http://127.0.0.1:8000/api/scan?target=example.com'
 curl 'http://127.0.0.1:8000/api/scan?target=example.com&deep=true'   # needs ownership verification
 curl -F files=@package-lock.json -F files=@settings.py http://127.0.0.1:8000/api/code
+curl 'http://127.0.0.1:8000/api/scan?target=example.com&share=true'    # response includes share_url / delete_url
+curl 'http://127.0.0.1:8000/api/reports/<id>'                           # fetch a shared report as JSON
 ```
+
+Without `RISKSCOPE_SMTP_HOST`, emails (monitor confirmations, alerts) are printed to the server log instead of
+sent, so you can follow the links locally.
 
 ### Configuration (environment variables)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RISKSCOPE_VERIFY_SECRET` | random per process | HMAC key for ownership tokens. **Set it in production**, otherwise tokens change on restart |
+| `RISKSCOPE_VERIFY_SECRET` | random per process | HMAC key for ownership and monitor-management tokens. **Set it in production**: if it changes, verification tokens and every monitor's manage/unsubscribe link break |
 | `RISKSCOPE_SCANS_PER_HOUR` | 20 | Scans per client IP per hour |
 | `RISKSCOPE_MAX_UPLOAD_MB` | 20 | Upload size limit |
 | `RISKSCOPE_TRUST_PROXY` | false | Take the client IP from `X-Forwarded-For` (only behind your own proxy) |
+| `RISKSCOPE_PUBLIC_BASE_URL` | `http://127.0.0.1:8000` | Absolute URL used in share links and emails |
+| `RISKSCOPE_DATABASE_PATH` | `riskscope.db` (`/data/riskscope.db` in Docker) | SQLite file for shared reports and monitors |
+| `RISKSCOPE_SHARE_TTL_DAYS` | 30 | Lifetime of shared reports and of monitor scan history |
+| `RISKSCOPE_SCHEDULER_ENABLED` | true | Run the re-scan loop inside the web process |
+| `RISKSCOPE_SCHEDULER_INTERVAL_S` | 300 | How often to look for due monitors |
+| `RISKSCOPE_MAX_MONITORS_PER_EMAIL` | 5 | Sites one email address can monitor |
+| `RISKSCOPE_SMTP_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD` / `_FROM` / `_STARTTLS` | unset / 587 / … | Outgoing mail. Unset host = log emails instead |
 
 ## Deploying
 
 ```bash
 docker build -t riskscope .
-docker run -p 8000:8000 -e RISKSCOPE_VERIFY_SECRET=$(openssl rand -hex 32) riskscope
+docker run -p 8000:8000 -v riskscope-data:/data \
+  -e RISKSCOPE_VERIFY_SECRET=$(openssl rand -hex 32) \
+  -e RISKSCOPE_PUBLIC_BASE_URL=https://scan.example.org \
+  -e RISKSCOPE_SMTP_HOST=smtp.example.org -e RISKSCOPE_SMTP_USERNAME=... -e RISKSCOPE_SMTP_PASSWORD=... \
+  -e RISKSCOPE_SMTP_FROM='riskscope <alerts@example.org>' \
+  riskscope
 ```
+
+Shared reports and monitors live in SQLite under `/data`, so mount a volume to keep them across restarts.
+Run **one** web process: the scheduler runs inside it, and SQLite plus the in-memory rate limiter assume a
+single process. To scale out, move the store to Postgres, set `RISKSCOPE_SCHEDULER_ENABLED=false` on all but one
+instance (or run the scheduler as its own worker), and share the rate limiter.
 
 A public scanner fetches URLs that strangers give it, so it's a natural SSRF target. riskscope accepts only public
 hostnames, checks that every resolved address is globally routable, re-validates every redirect hop, and connects
@@ -95,6 +145,9 @@ CDN's rate limiting in front before scaling out.
 uv run ruff check . && uv run ruff format --check . && uv run mypy src tests && uv run pytest -q
 ```
 
+`store.py` holds SQLite persistence and `monitoring.py` holds change detection, alert emails and the scheduler
+loop (`Scheduler.tick()` runs due monitors once, which is how the tests drive it).
+
 Each website check is a class with `name`, `title`, `active` and `async run(ctx) -> list[Finding]`
 (`src/riskscope/checks/`). Register new checks in `checks/__init__.py`. Every finding needs a plain-language
 `description`, a concrete `fix`, and snippets where config solves it. All network access goes through
@@ -102,8 +155,10 @@ Each website check is a class with `name`, `title`, `active` and `async run(ctx)
 
 ## Roadmap
 
-- [ ] Background job queue and shareable report links (opt-in, expiring)
-- [ ] Scheduled re-scans with email alerts on grade drops or certificate expiry
+- [x] Shareable report links (opt-in, expiring, deletable)
+- [x] Scheduled re-scans with email alerts on regressions, certificate expiry and outages
+- [ ] Background job queue so long scans don't hold a request open; Postgres store for multi-instance deploys
+- [ ] Weekly digest option and webhook/Slack alerts for monitors
 - [ ] Subdomain discovery from certificate transparency, plus dangling-CNAME (subdomain takeover) detection
 - [ ] More active checks for verified owners: open redirects, reflected XSS canaries, admin panel default credentials
 - [ ] Static analysis (SAST) of uploaded code; `pnpm-lock.yaml`, Maven/Gradle lockfiles

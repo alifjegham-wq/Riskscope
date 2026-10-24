@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Delete shared report: riskscope{% endblock %}
+{% block main %}
+<section class="card">
+  <h1>Delete this shared report?</h1>
+  <p>The share link will stop working for everyone. This can't be undone.</p>
+  <form method="post" action="/r/{{ rid }}/delete/{{ token }}">
+    <button type="submit" class="danger">Delete report</button>
+  </form>
+  <p><a href="/r/{{ rid }}">View the report instead</a></p>
+</section>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Monitor {{ target.host }}: riskscope{% endblock %}
+{% block main %}
+<section class="card">
+  <h1>Monitor {{ target.host }}</h1>
+  <p>We'll re-scan the site on a schedule and email you only when something gets worse: a new issue, a higher
+    severity (like a certificate getting close to expiry), or a lower grade.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/monitor">
+    <input type="hidden" name="target" value="{{ target.host }}">
+    <label for="email">Email for alerts</label>
+    <input id="email" name="email" type="email" required autocomplete="email" value="{{ email or '' }}">
+    <label for="frequency" class="spaced">How often</label>
+    <select id="frequency" name="frequency">
+      {% for f in frequencies %}<option value="{{ f.value }}" {% if (frequency or 'weekly') == f %}selected{% endif %}>{{ f.value|capitalize }}</option>{% endfor %}
+    </select>
+    <p><button type="submit">Start monitoring</button></p>
+  </form>
+</section>
+
+<section class="card">
+  <h2>First, prove you own {{ target.host }}</h2>
+  <p>Monitoring is only for site owners, so nobody can use riskscope to watch or email about other people's sites.
+    Do <strong>one</strong> of these, then press "Start monitoring":</p>
+  <h3>Option A: DNS TXT record</h3>
+  <dl class="kv">
+    <dt>Name</dt><dd><code>{{ dns_name }}</code></dd>
+    <dt>Value</dt><dd><code>{{ token }}</code></dd>
+  </dl>
+  <h3>Option B: file on your site</h3>
+  <p>Serve <code>{{ file_url }}</code> containing exactly:</p>
+  <pre>{{ token }}</pre>
+  <p class="muted">Keep it in place while monitoring runs. Active checks (open ports) are only included while it
+    still verifies.</p>
+</section>
+{% endblock %}
