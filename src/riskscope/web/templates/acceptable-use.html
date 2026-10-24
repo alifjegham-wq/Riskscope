@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Acceptable use: riskscope{% endblock %}
+{% block main %}
+<section class="card prose">
+  <h1>Acceptable use</h1>
+  <p>riskscope is a defensive tool. It exists to help people find and fix security problems on systems
+    <strong>they are responsible for</strong>.</p>
+
+  <h2>Only scan what you're allowed to</h2>
+  <p>Run riskscope against a website, IP address or codebase only if <strong>one</strong> of these is true:</p>
+  <ul>
+    <li>you own it, or your organisation does; or</li>
+    <li>you have explicit, written permission from the owner to test it (for example a signed penetration-test
+      scope); or</li>
+    <li>you are a national CERT or equivalent body acting within your legal mandate.</li>
+  </ul>
+  <p>Scanning systems you don't control, without the owner's authorisation, is illegal in most countries —
+    including under Tunisia's Law No. 2004-5 on cyber security and the Penal Code's computer-crime provisions —
+    even when you intend to help. Good intentions are not consent: the owner, not the scanner, decides.</p>
+
+  <h2>What riskscope will and won't do</h2>
+  <ul>
+    <li>Website checks that behave like an ordinary visitor or search engine (headers, certificates, public
+      DNS, well-known file paths) run on any public site.</li>
+    <li>Anything more intrusive — port scans, and scanning more than a single small block at a time — is
+      deliberately limited, and the more active checks require you to <strong>prove you own the domain</strong>
+      first. These limits are intentional and are not a bug to work around.</li>
+    <li>riskscope is not built for mass-scanning address space you don't own, and we won't add features whose
+      purpose is to do that.</li>
+  </ul>
+
+  <h2>If you want to protect others</h2>
+  <p>The lawful way to help organisations you don't control is <strong>coordinated disclosure</strong>: use
+    already-published internet-scan data (such as Shodan, Censys or Rapid7 Open Data) to identify exposure, then
+    contact the owner or their national CERT — without sending scanning traffic yourself. In Tunisia that is
+    <a href="https://www.ansi.tn" rel="noopener noreferrer">ANSI / tunCERT</a>.</p>
+
+  <h2>Abuse</h2>
+  <p>Scans are rate-limited per visitor. Operators of a riskscope instance may block or throttle any source that
+    appears to be scanning third parties without authorisation.</p>
+</section>
+{% endblock %}

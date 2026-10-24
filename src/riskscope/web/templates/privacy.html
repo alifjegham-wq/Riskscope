@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Privacy: riskscope{% endblock %}
+{% block main %}
+<section class="card prose">
+  <h1>Privacy</h1>
+  <h2>Website &amp; IP scans</h2>
+  <p>A scan's results are not stored unless you choose to share them. Ticking "Create a shareable link" saves
+    that one report behind an unguessable link that expires (you get a private delete link). Monitoring, where
+    available, keeps your scan history until you stop it. Nothing else about a scan is kept.</p>
+
+  <h2>Code scans</h2>
+  <p>Uploaded files are processed in memory and then discarded — they are never written to disk or stored. Only
+    package names and versions are sent to <a href="https://osv.dev" rel="noopener noreferrer">OSV.dev</a> to look
+    up known vulnerabilities. Any secrets found in your code are masked before they appear in the report.</p>
+
+  <h2>What reaches third parties</h2>
+  <ul>
+    <li><strong>OSV.dev</strong> — dependency names and versions, for vulnerability lookups.</li>
+    <li><strong>crt.sh</strong> — the domain you scan, to read certificate-transparency logs for subdomains.</li>
+    <li>A reverse-IP provider (only if the operator has configured one) — the IP you scan.</li>
+  </ul>
+  <p>Photos, file contents and scan findings are never sent anywhere beyond what's listed above.</p>
+
+  <h2>Logs &amp; rate limiting</h2>
+  <p>Like any web service, the server records basic request logs (including the visitor IP) for rate limiting and
+    abuse prevention. These are not linked to scan results.</p>
+
+  <h2>Email (monitoring)</h2>
+  <p>If you set up monitoring, your email address is stored so we can send alerts, and only for that. Every email
+    has a one-click unsubscribe, and stopping monitoring deletes the address and the scan history.</p>
+</section>
+{% endblock %}

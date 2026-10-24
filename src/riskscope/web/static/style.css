@@ -69,3 +69,5 @@ input[type=email] { width: 100%; max-width: 420px; display: block; }
 .row select { flex: 0 1 200px; }
 textarea { width: 100%; padding: 10px 12px; font: inherit; border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg); color: var(--text); resize: vertical; }
+footer .footlinks { margin-top: 10px; }
+footer .footlinks a { color: var(--muted); }
