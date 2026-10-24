@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
 from ..models import Category, Finding, Severity
 from .base import ScanContext
@@ -236,6 +237,43 @@ class SecurityHeadersCheck:
                 )
             )
 
+        if "cross-origin-opener-policy" not in h:
+            out.append(
+                Finding(
+                    id="headers.coop.missing",
+                    title="No Cross-Origin-Opener-Policy",
+                    severity=Severity.INFO,
+                    category=Category.HEADERS,
+                    description=(
+                        "Optional hardening: COOP isolates your pages from windows they open or that open "
+                        "them, blocking cross-window attacks (tabnabbing, cross-site leaks)."
+                    ),
+                    fix="Send Cross-Origin-Opener-Policy: same-origin (test popup/OAuth flows first).",
+                    snippets=_hdr("Cross-Origin-Opener-Policy", "same-origin"),
+                    references=[MDN + "Cross-Origin-Opener-Policy"],
+                )
+            )
+
+        deprecated = _deprecated_headers(h)
+        if deprecated:
+            out.append(
+                Finding(
+                    id="headers.deprecated",
+                    title="Deprecated or risky security headers are set",
+                    severity=Severity.LOW,
+                    category=Category.HEADERS,
+                    description=(
+                        "These headers are obsolete and can cause harm: HPKP (Public-Key-Pins) can lock "
+                        "users out of your site, and X-XSS-Protection's filter has itself caused cross-site "
+                        "leak bugs. Modern browsers ignore Expect-CT and X-XSS-Protection."
+                    ),
+                    evidence="; ".join(deprecated),
+                    fix="Remove these headers. Rely on HSTS, a strong Content-Security-Policy, and "
+                    "X-Content-Type-Options instead. If you keep X-XSS-Protection, set it to 0.",
+                    references=[MDN + "X-XSS-Protection"],
+                )
+            )
+
         disclosed = [f"{k}: {h[k]}" for k in ("server", "x-powered-by", "x-aspnet-version") if k in h]
         disclosed = [d for d in disclosed if _VERSION.search(d)]
         if disclosed:
@@ -290,6 +328,23 @@ class CorsCheck:
                 references=["https://portswigger.net/web-security/cors"],
             )
         ]
+
+
+def _deprecated_headers(h: Mapping[str, str]) -> list[str]:
+    """Report obsolete / risky security headers that are present.
+
+    X-XSS-Protection is only flagged when it is enabled (a non-zero value); the
+    recommended '0' is fine to keep.
+    """
+    found: list[str] = []
+    for name in ("public-key-pins", "public-key-pins-report-only", "expect-ct"):
+        value = h.get(name)
+        if value:
+            found.append(f"{name}: {value}")
+    xss = h.get("x-xss-protection")
+    if xss and xss.strip().split(";")[0].strip() not in ("", "0"):
+        found.append(f"x-xss-protection: {xss}")
+    return found
 
 
 def _directive(csp: str, name: str) -> str | None:
