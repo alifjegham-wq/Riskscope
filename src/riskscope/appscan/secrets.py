@@ -39,6 +39,40 @@ RULES: tuple[SecretRule, ...] = (
         re.compile(r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^:\s/@]+:[^@\s/]{3,}@[^\s'\"]+"),
         Severity.HIGH,
     ),
+    SecretRule(
+        "slack_webhook",
+        "Slack webhook URL",
+        re.compile(r"https://hooks\.slack\.com/services/T[A-Za-z0-9]+/B[A-Za-z0-9]+/[A-Za-z0-9]{16,}"),
+        Severity.HIGH,
+    ),
+    SecretRule("sendgrid_key", "SendGrid API key", re.compile(r"\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b")),
+    SecretRule("twilio_api_key", "Twilio API key", re.compile(r"\bSK[0-9a-f]{32}\b")),
+    SecretRule(
+        "azure_storage_key",
+        "Azure Storage account key",
+        re.compile(r"AccountKey=[A-Za-z0-9+/]{86}=="),
+        Severity.HIGH,
+    ),
+    SecretRule("gitlab_pat", "GitLab personal access token", re.compile(r"\bglpat-[A-Za-z0-9_-]{20}\b")),
+    SecretRule("npm_token", "npm access token", re.compile(r"\bnpm_[A-Za-z0-9]{36}\b"), Severity.HIGH),
+    SecretRule("pypi_token", "PyPI API token", re.compile(r"\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{50,}")),
+    SecretRule("digitalocean_token", "DigitalOcean token", re.compile(r"\bdop_v1_[0-9a-f]{64}\b"), Severity.HIGH),
+    SecretRule(
+        "square_token", "Square access token", re.compile(r"\bsq0(?:atp|csp)-[A-Za-z0-9_-]{22,}\b"), Severity.HIGH
+    ),
+    SecretRule("gcp_service_account", "Google service-account key", re.compile(r'"type"\s*:\s*"service_account"')),
+    SecretRule(
+        "basic_auth_url",
+        "Credentials embedded in a URL",
+        re.compile(r"\bhttps?://[^:/\s@]+:[^@/\s]{4,}@[^\s'\"]+"),
+        Severity.MEDIUM,
+    ),
+    SecretRule(
+        "jwt",
+        "JSON Web Token (JWT)",
+        re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+        Severity.LOW,
+    ),
 )
 
 MAX_FILE_BYTES = 1_000_000

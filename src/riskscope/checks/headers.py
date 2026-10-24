@@ -131,6 +131,55 @@ class SecurityHeadersCheck:
                         fix="Replace 'unsafe-inline' with nonces or hashes for the inline scripts you need.",
                     )
                 )
+            if "'unsafe-eval'" in script_src:
+                out.append(
+                    Finding(
+                        id="headers.csp.unsafe_eval",
+                        title="CSP allows eval() in scripts",
+                        severity=Severity.LOW,
+                        category=Category.HEADERS,
+                        description="'unsafe-eval' lets pages run strings as code, which XSS payloads rely on.",
+                        evidence=f"script-src {script_src}",
+                        fix="Remove 'unsafe-eval' and refactor any code that uses eval()/new Function().",
+                    )
+                )
+            if any(src in ("*", "http:", "https:") for src in script_src.split()):
+                out.append(
+                    Finding(
+                        id="headers.csp.wildcard_script",
+                        title="CSP lets scripts load from anywhere",
+                        severity=Severity.MEDIUM,
+                        category=Category.HEADERS,
+                        description=(
+                            "A wildcard (*) or bare http:/https: source in script-src means a script from any "
+                            "site is allowed, which defeats the CSP's XSS protection."
+                        ),
+                        evidence=f"script-src {script_src}",
+                        fix="List the exact origins your scripts come from instead of a wildcard.",
+                    )
+                )
+            if _directive(csp, "object-src") is None and _directive(csp, "default-src") is None:
+                out.append(
+                    Finding(
+                        id="headers.csp.no_object_src",
+                        title="CSP does not restrict plugins (object-src)",
+                        severity=Severity.LOW,
+                        category=Category.HEADERS,
+                        description="Without object-src, Flash/Java-style plugin content can still be embedded.",
+                        fix="Add object-src 'none' to the policy.",
+                    )
+                )
+            if _directive(csp, "base-uri") is None:
+                out.append(
+                    Finding(
+                        id="headers.csp.no_base_uri",
+                        title="CSP does not set base-uri",
+                        severity=Severity.LOW,
+                        category=Category.HEADERS,
+                        description="Without base-uri, an injected <base> tag can redirect every relative URL.",
+                        fix="Add base-uri 'self' (or 'none') to the policy.",
+                    )
+                )
 
         if "x-frame-options" not in h and not _directive(csp, "frame-ancestors"):
             out.append(

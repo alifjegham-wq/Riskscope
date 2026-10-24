@@ -138,3 +138,17 @@ async def test_scan_code_clean() -> None:
     lock = json.dumps({"lockfileVersion": 3, "packages": {"node_modules/left-pad": {"version": "1.3.0"}}})
     report = await scan_code({"package-lock.json": lock.encode()}, FakeVulns())
     assert report.grade == "A" and len(report.passed) == 2 and not report.errors
+
+
+def test_more_secret_patterns() -> None:
+    src = (
+        "SENDGRID = 'SG." + "a" * 22 + "." + "b" * 43 + "'\n"
+        "hook = 'https://hooks.slack.com/services/T00000000/B11111111/" + "c" * 24 + "'\n"
+        "NPM = 'npm_" + "d" * 36 + "'\n"
+        "DB = 'https://admin:s3cretpw@internal.example/db'\n"
+    )
+    ids = {f.id for f in find_secrets("config.py", src)}
+    assert "secrets.sendgrid_key.config.py" in ids
+    assert "secrets.slack_webhook.config.py" in ids
+    assert "secrets.npm_token.config.py" in ids
+    assert "secrets.basic_auth_url.config.py" in ids
