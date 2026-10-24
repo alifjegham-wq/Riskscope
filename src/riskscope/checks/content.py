@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit
 
 from ..models import Category, Finding, Severity
 from .base import ScanContext
+
+_SCRIPT_TAG = re.compile(r"<script\b[^>]*>", re.I)
+_SRC = re.compile(r"""\bsrc\s*=\s*["']([^"']+)["']""", re.I)
+_INTEGRITY = re.compile(r"\bintegrity\s*=", re.I)
 
 # Active mixed content (blocked/again by browsers, breaks the page and security): scripts, styles, iframes.
 _ACTIVE = re.compile(
@@ -72,3 +77,55 @@ class MixedContentCheck:
                 )
             )
         return out
+
+
+class SubresourceIntegrityCheck:
+    """Third-party <script> tags loaded without a Subresource Integrity hash.
+
+    If a CDN or third-party host is compromised, an attacker can swap the script and run code on
+    every visitor. An `integrity` hash makes the browser reject a script that was tampered with.
+    """
+
+    name = "sri"
+    title = "Subresource Integrity on third-party scripts"
+    active = False
+
+    async def run(self, ctx: ScanContext) -> list[Finding]:
+        res = await ctx.homepage()
+        target = ctx.target.host.lower()
+        risky: list[str] = []
+        for tag in _SCRIPT_TAG.findall(res.text[:1_000_000]):
+            m = _SRC.search(tag)
+            if not m:
+                continue
+            src = m.group(1)
+            if not src.startswith("https://"):
+                continue  # relative/same-origin or http:// (the mixed-content check covers http)
+            host = (urlsplit(src).hostname or "").lower()
+            if not host or host == target:
+                continue  # same-origin scripts do not need SRI
+            if _INTEGRITY.search(tag):
+                continue
+            risky.append(src)
+        risky = sorted(set(risky))
+        if not risky:
+            return []
+        return [
+            Finding(
+                id="content.sri.missing",
+                title="Third-party scripts have no Subresource Integrity hash",
+                severity=Severity.LOW,
+                category=Category.DEPENDENCIES,
+                description=(
+                    "These scripts load from other hosts without an integrity hash. If one of those hosts is "
+                    "compromised, the attacker's code runs on your pages (a supply-chain attack)."
+                ),
+                evidence="\n".join(risky[:10]) + (f"\n… and {len(risky) - 10} more" if len(risky) > 10 else ""),
+                fix="Add an integrity (SRI) hash and crossorigin to each third-party <script>, or self-host it.",
+                snippets={
+                    "HTML": '<script src="https://cdn.example.com/lib.js" '
+                    'integrity="sha384-…" crossorigin="anonymous"></script>'
+                },
+                references=["https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity"],
+            )
+        ]

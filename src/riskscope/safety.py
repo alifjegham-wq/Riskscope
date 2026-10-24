@@ -154,3 +154,8 @@ class SafeFetcher:
                 continue
             return FetchResult(response=resp, body=bytes(body[:MAX_BODY_BYTES]), history=history)
         raise UnsafeTargetError("Too many redirects")
+
+    async def options(self, url: str) -> httpx.Response:
+        """A single OPTIONS request (validated, no redirects). Used to read the advertised methods."""
+        await self._check(url)
+        return await self.client.request("OPTIONS", url, headers={"User-Agent": USER_AGENT}, follow_redirects=False)
