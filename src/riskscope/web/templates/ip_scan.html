@@ -15,6 +15,14 @@
   </div>
 </section>
 
+{% if export_rows %}
+<div class="actions">
+  <button type="button" class="secondary" data-export="csv" data-filename="riskscope-ip-scan">⬇ Download CSV</button>
+  <button type="button" class="secondary" data-export="json" data-filename="riskscope-ip-scan">⬇ Download JSON</button>
+</div>
+<script type="application/json" id="scan-export">{{ export_rows|tojson }}</script>
+{% endif %}
+
 {% if not result.scanned %}
 <section class="card">
   <h2>No website found on {{ d.target.label }}</h2>

@@ -94,6 +94,8 @@ class BulkItem:
     token: str | None = None
     dns_name: str | None = None
     file_url: str | None = None
+    #: For a host found by expanding an IP/CIDR entry: how it was discovered (passive scan only).
+    via: str | None = None
 
 
 @dataclass
@@ -106,7 +108,32 @@ class BulkScanResult:
 
     @property
     def unverified(self) -> int:
-        return sum(1 for i in self.items if i.host is not None and not i.verified)
+        # Items that parsed as a domain but still need an ownership proof before they can be scanned.
+        return sum(1 for i in self.items if i.token is not None)
+
+
+def _export_rows(items: list[BulkItem]) -> list[dict[str, object]]:
+    """Flat, spreadsheet-friendly rows for CSV/JSON export of a bulk or IP scan."""
+    rows: list[dict[str, object]] = []
+    for i in items:
+        counts: dict[Severity, int] = i.report.counts() if i.report else {}
+        rows.append(
+            {
+                "target": i.target,
+                "host": i.host or "",
+                "status": "scanned" if i.report else ("unverified" if i.token else "error"),
+                "grade": i.report.grade if i.report else "",
+                "score": i.report.score if i.report else "",
+                "risk_level": i.report.risk_level if i.report else "",
+                "critical": counts.get(Severity.CRITICAL, 0),
+                "high": counts.get(Severity.HIGH, 0),
+                "medium": counts.get(Severity.MEDIUM, 0),
+                "low": counts.get(Severity.LOW, 0),
+                "info": counts.get(Severity.INFO, 0),
+                "note": i.via or i.error or "",
+            }
+        )
+    return rows
 
 
 class VerificationCtx(TypedDict):
@@ -157,7 +184,7 @@ class Services:
         ctx = ScanContext(target=target, fetcher=fetcher, dns=self.dns, exists=self.exists, verified_owner=verified)
         return await scan_website(ctx, select_checks(self.checks, profile))
 
-    async def ip_scan(self, raw: str) -> IpScanResult:
+    async def ip_scan(self, raw: str, profile: str = DEFAULT_PROFILE) -> IpScanResult:
         """Find the site(s) hosted on an IP or CIDR block and scan each (passive checks only)."""
         target = parse_ip_target(raw, self.settings.max_cidr_hosts)
         discovery = await discover_sites(
@@ -170,13 +197,15 @@ class Services:
         )
         scanned: list[tuple[DiscoveredSite, Report]] = []
         for site in discovery.sites:
-            report = await self.scan(parse_target(site.host), False)
+            report = await self.scan(parse_target(site.host), False, profile)
             scanned.append((site, report))
         return IpScanResult(discovery=discovery, scanned=scanned)
 
-    async def bulk_scan(self, raw_targets: list[str]) -> BulkScanResult:
-        """Scan several domains at once. Each is scanned only after it passes ownership verification,
-        so a bulk scan is always limited to domains the requester has proven they control."""
+    async def bulk_scan(self, raw_targets: list[str], profile: str = DEFAULT_PROFILE) -> BulkScanResult:
+        """Scan several assets at once. Domains are scanned only after they pass ownership verification;
+        IP/CIDR entries are expanded to the sites hosted there and scanned passively (the same capped,
+        reverse-DNS/TLS-only discovery as a single IP scan). So a bulk run never does more than the
+        single-target flows already allow."""
         seen: set[str] = set()
         targets: list[str] = []
         for raw in raw_targets:
@@ -189,25 +218,38 @@ class Services:
 
         sem = asyncio.Semaphore(5)
 
-        async def one(raw: str) -> BulkItem:
+        async def one(raw: str) -> list[BulkItem]:
+            if looks_like_ip_target(raw):
+                try:
+                    ipres = await self.ip_scan(raw, profile)
+                except UnsafeTargetError as exc:
+                    return [BulkItem(target=raw, error=str(exc))]
+                if not ipres.scanned:
+                    return [BulkItem(target=raw, error="No sites found on this IP or range")]
+                return [
+                    BulkItem(target=raw, host=site.host, report=report, via=f"found on {raw}")
+                    for site, report in ipres.scanned
+                ]
             try:
                 target = parse_target(raw)
             except UnsafeTargetError as exc:
-                return BulkItem(target=raw, error=str(exc))
+                return [BulkItem(target=raw, error=str(exc))]
             async with sem:
                 if not await self.verified(target):
-                    return BulkItem(
-                        target=raw,
-                        host=target.host,
-                        token=token_for(target.registrable_hint, self.settings.verify_secret),
-                        dns_name=f"{DNS_LABEL}.{target.registrable_hint}",
-                        file_url=target.url + WELL_KNOWN_PATH,
-                    )
-                report = await self.scan(target, True)
-            return BulkItem(target=raw, host=target.host, verified=True, report=report)
+                    return [
+                        BulkItem(
+                            target=raw,
+                            host=target.host,
+                            token=token_for(target.registrable_hint, self.settings.verify_secret),
+                            dns_name=f"{DNS_LABEL}.{target.registrable_hint}",
+                            file_url=target.url + WELL_KNOWN_PATH,
+                        )
+                    ]
+                report = await self.scan(target, True, profile)
+            return [BulkItem(target=raw, host=target.host, verified=True, report=report)]
 
-        items = await asyncio.gather(*(one(t) for t in targets))
-        return BulkScanResult(items=list(items))
+        nested = await asyncio.gather(*(one(t) for t in targets))
+        return BulkScanResult(items=[item for sub in nested for item in sub])
 
     async def share(self, report: Report) -> Report:
         ttl = self.settings.share_ttl_days * 86_400
@@ -370,7 +412,9 @@ def create_app(
         try:
             check_rate(request)
             if looks_like_ip_target(target):
-                return page(request, "ip_scan.html", result=await svc(request).ip_scan(target))
+                ip_result = await svc(request).ip_scan(target, profile)
+                ip_rows = _export_rows([BulkItem(target=s.host, host=s.host, report=r) for s, r in ip_result.scanned])
+                return page(request, "ip_scan.html", result=ip_result, export_rows=ip_rows)
             parsed, report = await run_site_scan(request, target, deep, profile)
         except UnsafeTargetError as exc:
             return page(request, "index.html", 400, error=str(exc), target=target, profile=profile)
@@ -437,7 +481,12 @@ def create_app(
         return page(request, "bulk_new.html", max_bulk=svc(request).settings.max_bulk_targets)
 
     @app.post("/bulk", response_class=HTMLResponse)
-    async def bulk_scan_page(request: Request, targets: Annotated[str, Form()]) -> HTMLResponse:
+    async def bulk_scan_page(
+        request: Request,
+        targets: Annotated[str, Form()],
+        profile: Annotated[str, Form()] = DEFAULT_PROFILE,
+    ) -> HTMLResponse:
+        profile = normalize_profile(profile)
         try:
             check_rate(request)
         except HTTPException as exc:
@@ -455,11 +504,11 @@ def create_app(
                 request,
                 "bulk_new.html",
                 400,
-                error="Enter at least one domain.",
+                error="Enter at least one domain or IP.",
                 max_bulk=svc(request).settings.max_bulk_targets,
             )
-        result = await svc(request).bulk_scan(lines)
-        return page(request, "bulk.html", result=result)
+        result = await svc(request).bulk_scan(lines, profile)
+        return page(request, "bulk.html", result=result, export_rows=_export_rows(result.items))
 
     # ---- shared reports ----------------------------------------------------
 
@@ -682,9 +731,13 @@ def create_app(
         return await share_or_plain(request, report, share)
 
     @app.post("/api/bulk-scan")
-    async def api_bulk_scan(request: Request, targets: Annotated[list[str], Form()]) -> JSONResponse:
+    async def api_bulk_scan(
+        request: Request,
+        targets: Annotated[list[str], Form()],
+        profile: Annotated[str, Form()] = DEFAULT_PROFILE,
+    ) -> JSONResponse:
         check_rate(request)
-        result = await svc(request).bulk_scan(targets)
+        result = await svc(request).bulk_scan(targets, normalize_profile(profile))
         return JSONResponse(
             {
                 "scanned": result.scanned,
@@ -694,6 +747,7 @@ def create_app(
                         "target": i.target,
                         "host": i.host,
                         "verified": i.verified,
+                        "via": i.via,
                         "error": i.error,
                         "report": i.report.model_dump(mode="json") if i.report else None,
                         "verify": None
