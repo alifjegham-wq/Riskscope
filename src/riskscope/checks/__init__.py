@@ -9,6 +9,7 @@ from .dns_email import DnsHardeningCheck, EmailAuthCheck
 from .exposure import ExposedFilesCheck, SecurityTxtCheck
 from .headers import CorsCheck, HttpsRedirectCheck, SecurityHeadersCheck
 from .libraries import JsLibraryCheck
+from .php import PhpVersionCheck
 from .ports import OpenPortsCheck
 from .subdomains import SubdomainSource, SubdomainTakeoverCheck
 from .tls import TlsCheck
@@ -27,6 +28,7 @@ def default_checks(vulns: VulnSource, subdomains: SubdomainSource | None = None)
         SecurityTxtCheck(),
         SubdomainTakeoverCheck(subdomains),
         JsLibraryCheck(vulns),
+        PhpVersionCheck(),
         OpenPortsCheck(),
     ]
 

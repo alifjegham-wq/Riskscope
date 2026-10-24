@@ -18,6 +18,7 @@ It is built for people who don't have a security team: small businesses, freelan
 | Email & DNS | SPF (missing / multiple / `+all`), DMARC (missing / `p=none`), CAA, DNSSEC |
 | Exposed files | `.git`, `.env`, AWS credentials, SQL dumps, config backups, `.htpasswd`, backup archives, `server-status`, `phpinfo`, `.DS_Store`, directory listing, `security.txt` |
 | Subdomains | Subdomain takeover: subdomains (from certificate transparency logs plus common names) whose CNAME points at an unclaimed GitHub Pages, Heroku, S3, Azure, Shopify, Fastly, … resource, and dangling CNAMEs to names that no longer exist |
+| PHP runtime | PHP version (from headers or an exposed `phpinfo()`) checked against critical PHP advisories, currently **PHP2Shell** (CVE-2026-109618/-109619, fixed in 8.5.12 / 8.4.27 / 8.3.36 / 8.2.35), plus end-of-life branches. Hidden versions get an info note listing the safe releases |
 | Outdated software | Version disclosure in headers; front-end JS libraries (jQuery, Bootstrap, Angular, Lodash, …) checked against [OSV.dev](https://osv.dev) |
 
 Subdomain takeover detection only flags a service when there's evidence the resource is unclaimed: either the
@@ -26,6 +27,11 @@ service's own "nothing here" page (fingerprints based on
 the CNAME target no longer existing in DNS. DNS timeouts are never counted as "doesn't exist". It costs only DNS
 lookups plus one homepage request for subdomains that point at a known service. The scanned domain name is sent to
 [crt.sh](https://crt.sh) to look up certificate transparency logs.
+
+PHP advisories are a data table in `src/riskscope/checks/php.py` (`ADVISORIES`, `OLDEST_SUPPORTED`). When PHP
+ships the next emergency release, add an entry there. Because distributions backport fixes without changing the
+version string, a vulnerable-looking version on a server that reports RHEL, Debian, Ubuntu and similar is
+rated high (with a "check your distribution's advisory" note) rather than critical.
 
 Exposed-file checks match file *contents* (e.g. `ref: refs/` for `.git/HEAD`), so sites that answer
 "200 OK" for every URL don't produce false positives.
