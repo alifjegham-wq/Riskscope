@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Asset scan results: riskscope{% endblock %}
+{% block main %}
+<section class="summary card">
+  <div>
+    <h1>Asset scan</h1>
+    <p class="muted">{{ result.scanned }} scanned ·
+      {{ result.unverified }} awaiting ownership verification ·
+      {{ result.items|length }} submitted</p>
+  </div>
+</section>
+
+{% for item in result.items %}
+{% if item.report %}
+{% set report = item.report %}
+{% set counts = report.counts() %}
+<section class="summary card">
+  <div class="grade grade-{{ report.grade }}" aria-label="Grade {{ report.grade }}">{{ report.grade }}</div>
+  <div>
+    <h2>{{ item.host }}</h2>
+    <p class="risk">Risk level: <strong>{{ report.risk_level }}</strong> · score {{ report.score }}/100</p>
+    <p class="counts">
+      {% for sev in Severity %}{% if counts[sev] %}<span class="sev sev-{{ sev.value }}">{{ counts[sev] }} {{ sev.value }}</span> {% endif %}{% endfor %}
+      {% if not report.findings %}<span class="sev sev-ok">No issues found</span>{% endif %}
+    </p>
+    <p class="muted">Owner verified · active checks included · {{ (report.duration_ms / 1000)|round(1) }}s</p>
+  </div>
+</section>
+{% if report.findings %}
+<section>
+  {% for f in report.sorted_findings() %}
+  <details class="finding" {% if f.severity.rank <= 0 %}open{% endif %}>
+    <summary><span class="sev sev-{{ f.severity.value }}">{{ f.severity.value }}</span>
+      <span class="ftitle">{{ f.title }}</span> <span class="cat">{{ f.category.value }}</span></summary>
+    <p>{{ f.description }}</p>
+    {% if f.evidence %}<p class="label">Evidence</p><pre>{{ f.evidence }}</pre>{% endif %}
+    {% if f.fix %}<p class="label">How to fix</p><p>{{ f.fix }}</p>{% endif %}
+    {% for platform, code in f.snippets.items() %}<p class="label">{{ platform }}</p><pre>{{ code }}</pre>{% endfor %}
+  </details>
+  {% endfor %}
+</section>
+{% endif %}
+{% elif item.token %}
+<section class="card">
+  <h2>{{ item.host }} — not verified yet</h2>
+  <p>Prove you own this domain, then scan again. Do one of:</p>
+  <dl class="kv">
+    <dt>DNS TXT name</dt><dd><code>{{ item.dns_name }}</code></dd>
+    <dt>DNS TXT value</dt><dd><code>{{ item.token }}</code></dd>
+  </dl>
+  <p>…or serve <code>{{ item.file_url }}</code> containing <code>{{ item.token }}</code>.</p>
+</section>
+{% else %}
+<section class="card">
+  <h2>{{ item.target }} — skipped</h2>
+  <p class="error">{{ item.error }}</p>
+</section>
+{% endif %}
+{% endfor %}
+
+<p><a href="/bulk">← Scan more</a> · <a href="/">Home</a></p>
+{% endblock %}

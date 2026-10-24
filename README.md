@@ -12,6 +12,7 @@ It is built for people who don't have a security team: small businesses, freelan
 
 | Area | Checks |
 |---|---|
+| Bulk (your assets) | Scan many of your own domains at once at `/bulk` — each gated behind ownership verification, so it only ever runs on sites you control. Verified domains get the full scan incl. the active port check |
 | By IP / CIDR | Enter an IP address or a small CIDR block and riskscope finds the site(s) hosted there (reverse DNS, TLS certificate names, optional passive DNS) and runs the passive checks below on each |
 | Encryption (TLS) | Certificate trust and expiry, TLS 1.0/1.1 still accepted, HTTP → HTTPS redirect |
 | Browser protections | HSTS, Content-Security-Policy (incl. `unsafe-inline`), clickjacking, `nosniff`, Referrer-Policy, Permissions-Policy, CORS origin reflection |
@@ -136,6 +137,7 @@ sent, so you can follow the links locally.
 | `RISKSCOPE_MAX_UPLOAD_MB` | 20 | Upload size limit |
 | `RISKSCOPE_MAX_CIDR_HOSTS` | 256 | Largest CIDR block (addresses) one IP scan may enumerate |
 | `RISKSCOPE_MAX_IP_SITES` | 10 | Most sites one IP/CIDR request will scan |
+| `RISKSCOPE_MAX_BULK_TARGETS` | 25 | Most domains one bulk asset-scan request accepts (each must verify ownership) |
 | `RISKSCOPE_REVERSE_IP_PROVIDER` | none | Reverse-IP passive-DNS provider: `none` or `hackertarget` (sends the scanned IP to that service) |
 | `RISKSCOPE_TRUST_PROXY` | false | Take the client IP from `X-Forwarded-For` (only behind your own proxy) |
 | `RISKSCOPE_PUBLIC_BASE_URL` | `http://127.0.0.1:8000` | Absolute URL used in share links and emails |

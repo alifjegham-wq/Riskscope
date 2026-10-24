@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Scan your assets: riskscope{% endblock %}
+{% block main %}
+<section class="card">
+  <h1>Scan several of your sites at once</h1>
+  <p>Enter the domains you want to check, one per line (up to {{ max_bulk }}). Each one is scanned only after it
+    passes <strong>ownership verification</strong> — so this is for sites you control, not for scanning others.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/bulk">
+    <label for="targets">Your domains</label>
+    <textarea id="targets" name="targets" rows="8" required
+      placeholder="example.com&#10;shop.example.com&#10;blog.example.com">{{ targets or '' }}</textarea>
+    <p><button type="submit">Scan my assets</button></p>
+  </form>
+  <p class="muted">Verify a domain by publishing a DNS TXT record at <code>_riskscope-challenge.&lt;domain&gt;</code>
+    or a file at <code>/.well-known/riskscope-verify.txt</code> (the exact value is shown per domain if it isn't
+    verified yet). Verified domains get the full scan, including the active port check.</p>
+</section>
+{% endblock %}

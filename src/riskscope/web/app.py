@@ -75,6 +75,32 @@ class IpScanResult:
     scanned: list[tuple[DiscoveredSite, Report]]
 
 
+@dataclass
+class BulkItem:
+    target: str  # as entered
+    host: str | None = None
+    verified: bool = False
+    report: Report | None = None
+    error: str | None = None
+    #: Verification instructions, present only when the domain parsed but ownership is unproven.
+    token: str | None = None
+    dns_name: str | None = None
+    file_url: str | None = None
+
+
+@dataclass
+class BulkScanResult:
+    items: list[BulkItem]
+
+    @property
+    def scanned(self) -> int:
+        return sum(1 for i in self.items if i.report is not None)
+
+    @property
+    def unverified(self) -> int:
+        return sum(1 for i in self.items if i.host is not None and not i.verified)
+
+
 class VerificationCtx(TypedDict):
     target: Target
     token: str
@@ -135,6 +161,41 @@ class Services:
             report = await self.scan(parse_target(site.host), False)
             scanned.append((site, report))
         return IpScanResult(discovery=discovery, scanned=scanned)
+
+    async def bulk_scan(self, raw_targets: list[str]) -> BulkScanResult:
+        """Scan several domains at once. Each is scanned only after it passes ownership verification,
+        so a bulk scan is always limited to domains the requester has proven they control."""
+        seen: set[str] = set()
+        targets: list[str] = []
+        for raw in raw_targets:
+            raw = raw.strip()
+            if raw and raw.lower() not in seen:
+                seen.add(raw.lower())
+                targets.append(raw)
+            if len(targets) >= self.settings.max_bulk_targets:
+                break
+
+        sem = asyncio.Semaphore(5)
+
+        async def one(raw: str) -> BulkItem:
+            try:
+                target = parse_target(raw)
+            except UnsafeTargetError as exc:
+                return BulkItem(target=raw, error=str(exc))
+            async with sem:
+                if not await self.verified(target):
+                    return BulkItem(
+                        target=raw,
+                        host=target.host,
+                        token=token_for(target.registrable_hint, self.settings.verify_secret),
+                        dns_name=f"{DNS_LABEL}.{target.registrable_hint}",
+                        file_url=target.url + WELL_KNOWN_PATH,
+                    )
+                report = await self.scan(target, True)
+            return BulkItem(target=raw, host=target.host, verified=True, report=report)
+
+        items = await asyncio.gather(*(one(t) for t in targets))
+        return BulkScanResult(items=list(items))
 
     async def share(self, report: Report) -> Report:
         ttl = self.settings.share_ttl_days * 86_400
@@ -353,6 +414,35 @@ def create_app(
         label = files[0].filename if len(files) == 1 and files[0].filename else f"{len(expanded)} files"
         return await scan_code(expanded, s.vulns, label=label)
 
+    @app.get("/bulk", response_class=HTMLResponse)
+    async def bulk_form(request: Request) -> HTMLResponse:
+        return page(request, "bulk_new.html", max_bulk=svc(request).settings.max_bulk_targets)
+
+    @app.post("/bulk", response_class=HTMLResponse)
+    async def bulk_scan_page(request: Request, targets: Annotated[str, Form()]) -> HTMLResponse:
+        try:
+            check_rate(request)
+        except HTTPException as exc:
+            return page(
+                request,
+                "bulk_new.html",
+                exc.status_code,
+                error=exc.detail,
+                targets=targets,
+                max_bulk=svc(request).settings.max_bulk_targets,
+            )
+        lines = [ln for ln in targets.replace(",", "\n").splitlines() if ln.strip()]
+        if not lines:
+            return page(
+                request,
+                "bulk_new.html",
+                400,
+                error="Enter at least one domain.",
+                max_bulk=svc(request).settings.max_bulk_targets,
+            )
+        result = await svc(request).bulk_scan(lines)
+        return page(request, "bulk.html", result=result)
+
     # ---- shared reports ----------------------------------------------------
 
     @app.get("/r/{rid}", response_class=HTMLResponse)
@@ -570,6 +660,30 @@ def create_app(
         except UploadError as exc:
             raise HTTPException(400, str(exc)) from exc
         return await share_or_plain(request, report, share)
+
+    @app.post("/api/bulk-scan")
+    async def api_bulk_scan(request: Request, targets: Annotated[list[str], Form()]) -> JSONResponse:
+        check_rate(request)
+        result = await svc(request).bulk_scan(targets)
+        return JSONResponse(
+            {
+                "scanned": result.scanned,
+                "unverified": result.unverified,
+                "items": [
+                    {
+                        "target": i.target,
+                        "host": i.host,
+                        "verified": i.verified,
+                        "error": i.error,
+                        "report": i.report.model_dump(mode="json") if i.report else None,
+                        "verify": None
+                        if i.token is None
+                        else {"dns_name": i.dns_name, "token": i.token, "file_url": i.file_url},
+                    }
+                    for i in result.items
+                ],
+            }
+        )
 
     @app.get("/api/ip-scan")
     async def api_ip_scan(request: Request, target: str) -> JSONResponse:
