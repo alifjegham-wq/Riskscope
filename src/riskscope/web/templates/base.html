@@ -17,9 +17,26 @@
 </head>
 <body>
   <header class="top">
-    <a class="brand" href="/">riskscope</a>
-    <nav><a href="/how-it-works">How it works</a> <a href="/api/docs">API</a>
-      <a href="https://github.com/alifjegham-wq/Riskscope">Source</a></nav>
+    <div class="top-inner">
+      <a class="brand" href="/">
+        <svg class="logo" viewBox="0 0 512 512" width="28" height="28" aria-hidden="true">
+          <rect width="512" height="512" rx="112" fill="#2457d6"/>
+          <path d="M256 92 L388 140 V248 C388 336 332 394 256 424 C180 394 124 336 124 248 V140 Z" fill="#fff"/>
+          <path d="M196 260 L240 304 L322 214" fill="none" stroke="#2457d6" stroke-width="36"
+            stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>riskscope</span>
+      </a>
+      <input type="checkbox" id="nav-toggle" class="nav-toggle">
+      <label for="nav-toggle" class="nav-btn" aria-label="Toggle menu"><span></span><span></span><span></span></label>
+      <nav class="nav">
+        <a href="/"{% if nav == 'scan' %} class="here"{% endif %}>Scan</a>
+        <a href="/bulk"{% if nav == 'bulk' %} class="here"{% endif %}>Bulk</a>
+        <a href="/how-it-works"{% if nav == 'how' %} class="here"{% endif %}>How it works</a>
+        <a href="/api/docs">API</a>
+        <a href="https://github.com/alifjegham-wq/Riskscope">Source</a>
+      </nav>
+    </div>
   </header>
   <main>{% block main %}{% endblock %}</main>
   <footer>
