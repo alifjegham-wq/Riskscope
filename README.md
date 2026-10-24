@@ -72,7 +72,11 @@ Owners can have a site re-scanned **daily or weekly** and get an email only when
 * a lower grade;
 * the site couldn't be reached 3 times in a row.
 
-The first run sends a "monitoring started" summary. Each run is saved as a report, so the monitor's manage page
+The first run sends a "monitoring started" summary. Owners can also opt into a **weekly digest** (a checkbox at
+setup, or a toggle on the manage page). It's one email a week with the grade against a week ago, how many scans
+ran, what was found and fixed, and the top things to fix next. It's sent even when nothing got worse, and says
+so when no scan succeeded that week. Digests read the monitor's saved reports, so keep
+`RISKSCOPE_SHARE_TTL_DAYS` at 8 or more. Each run is saved as a report, so the monitor's manage page
 shows the grade history with links to every scan.
 
 Abuse protections: setting up a monitor requires the same **ownership verification** as active checks (it's
@@ -172,7 +176,8 @@ Each website check is a class with `name`, `title`, `active` and `async run(ctx)
 - [x] Shareable report links (opt-in, expiring, deletable)
 - [x] Scheduled re-scans with email alerts on regressions, certificate expiry and outages
 - [ ] Background job queue so long scans don't hold a request open; Postgres store for multi-instance deploys
-- [ ] Weekly digest option and webhook/Slack alerts for monitors
+- [x] Weekly digest option for monitors
+- [ ] Webhook/Slack alerts for monitors
 - [x] Subdomain discovery from certificate transparency, plus dangling-CNAME (subdomain takeover) detection
 - [ ] NS-delegation takeovers (subdomains delegated to unclaimed DNS zones) and scheduled fingerprint refresh
 - [ ] More active checks for verified owners: open redirects, reflected XSS canaries, admin panel default credentials

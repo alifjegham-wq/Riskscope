@@ -205,3 +205,22 @@ def test_monitor_mail_failure_is_a_friendly_error() -> None:
     with make_client(_verified_dns(), mailer=_BrokenMailer()) as c:
         r = c.post("/monitor", data={"target": "example.com", "email": "me@example.com"})
         assert r.status_code == 503 and "send the email just now" in r.text
+
+
+def test_monitor_digest_opt_in_and_toggle() -> None:
+    mailer = LogMailer()
+    with make_client(_verified_dns(), mailer=mailer) as c:
+        assert 'name="digest"' in c.get("/monitor", params={"target": "example.com"}).text
+        c.post("/monitor", data={"target": "example.com", "email": "me@example.com", "digest": "true"})
+        manage = re.search(r"https://riskscope\.test(/m/[\w-]+/[\w-]+)", mailer.sent[0].body)
+        assert manage
+        path = manage.group(1)
+        c.post(path + "/activate")
+        page = c.get(path).text
+        assert "Weekly summary: <strong>on</strong>" in page and "next around" in page
+
+        assert c.post(path + "/digest", follow_redirects=False).status_code == 303  # no field = turn off
+        assert "Weekly summary: <strong>off</strong>" in c.get(path).text
+        c.post(path + "/digest", data={"enabled": "true"})
+        assert "Weekly summary: <strong>on</strong>" in c.get(path).text
+        assert c.post(path[:-2] + "xx/digest", data={"enabled": "true"}).status_code == 404

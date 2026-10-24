@@ -49,11 +49,21 @@ CREATE TABLE IF NOT EXISTS monitors (
     created_at     REAL NOT NULL,
     next_run_at    REAL NOT NULL,
     last_report_id TEXT,
-    failures       INTEGER NOT NULL DEFAULT 0
+    failures       INTEGER NOT NULL DEFAULT 0,
+    digest         INTEGER NOT NULL DEFAULT 0,
+    next_digest_at REAL
 );
 CREATE INDEX IF NOT EXISTS monitors_due ON monitors(confirmed, next_run_at);
 CREATE INDEX IF NOT EXISTS monitors_email ON monitors(email);
 """
+
+#: Columns added after the first release: (table, column, definition). Applied to older databases on startup.
+MIGRATIONS = (
+    ("monitors", "digest", "INTEGER NOT NULL DEFAULT 0"),
+    ("monitors", "next_digest_at", "REAL"),
+)
+
+DIGEST_PERIOD_S = 7 * 86_400
 
 
 class Frequency(StrEnum):
@@ -105,6 +115,8 @@ class Monitor:
     next_run_at: float
     last_report_id: str | None
     failures: int
+    digest: bool = False
+    next_digest_at: float | None = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +137,13 @@ class Store:
             if path != ":memory:":
                 self._db.execute("PRAGMA journal_mode = WAL")
             self._db.executescript(SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        for table, column, definition in MIGRATIONS:
+            existing = {r["name"] for r in self._db.execute(f"PRAGMA table_info({table})")}
+            if column not in existing:
+                self._db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def close(self) -> None:
         with self._lock:
@@ -164,15 +183,7 @@ class Store:
                 "SELECT id, body, created_at, expires_at, monitor_id FROM reports WHERE id = ? AND expires_at > ?",
                 (rid, now),
             ).fetchone()
-        if row is None:
-            return None
-        return StoredReport(
-            id=row["id"],
-            report=Report.model_validate_json(row["body"]),
-            created_at=row["created_at"],
-            expires_at=row["expires_at"],
-            monitor_id=row["monitor_id"],
-        )
+        return _stored(row) if row else None
 
     def check_report_token(self, rid: str, token: str) -> bool:
         with self._lock:
@@ -196,14 +207,16 @@ class Store:
 
     # ---- monitors ----------------------------------------------------------
 
-    def create_monitor(self, target: str, email: str, frequency: Frequency, now: float | None = None) -> Monitor:
+    def create_monitor(
+        self, target: str, email: str, frequency: Frequency, now: float | None = None, *, digest: bool = False
+    ) -> Monitor:
         now = time.time() if now is None else now
         mid = new_id()
         with self._lock:
             self._db.execute(
-                "INSERT INTO monitors (id, target, email, frequency, created_at, next_run_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                (mid, target, email.lower(), frequency.value, now, now),
+                "INSERT INTO monitors (id, target, email, frequency, created_at, next_run_at, digest)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (mid, target, email.lower(), frequency.value, now, now, int(digest)),
             )
         monitor = self.get_monitor(mid)
         assert monitor is not None
@@ -230,11 +243,24 @@ class Store:
         with self._lock:
             self._db.execute("UPDATE monitors SET frequency = ? WHERE id = ?", (frequency.value, mid))
 
-    def confirm_monitor(self, mid: str, now: float | None = None) -> None:
-        """Activate; the first scan runs on the next scheduler tick."""
+    def set_digest(self, mid: str, enabled: bool, now: float | None = None) -> None:
+        """Switch the weekly summary on (first one a week from now) or off."""
         now = time.time() if now is None else now
         with self._lock:
-            self._db.execute("UPDATE monitors SET confirmed = 1, next_run_at = ? WHERE id = ?", (now, mid))
+            self._db.execute(
+                "UPDATE monitors SET digest = ?, next_digest_at = ? WHERE id = ?",
+                (int(enabled), now + DIGEST_PERIOD_S if enabled else None, mid),
+            )
+
+    def confirm_monitor(self, mid: str, now: float | None = None) -> None:
+        """Activate; the first scan runs on the next scheduler tick, the first digest a week later."""
+        now = time.time() if now is None else now
+        with self._lock:
+            self._db.execute(
+                "UPDATE monitors SET confirmed = 1, next_run_at = ?,"
+                " next_digest_at = CASE WHEN digest = 1 THEN ? ELSE NULL END WHERE id = ?",
+                (now, now + DIGEST_PERIOD_S, mid),
+            )
 
     def delete_monitor(self, mid: str) -> None:
         with self._lock:
@@ -267,6 +293,47 @@ class Store:
                 raise
         return [_monitor(r) for r in rows]
 
+    def claim_due_digests(self, now: float | None = None, limit: int = 50) -> list[Monitor]:
+        """Like `claim_due`, for weekly summaries: returns them and schedules the next one."""
+        now = time.time() if now is None else now
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                rows = self._db.execute(
+                    "SELECT * FROM monitors WHERE confirmed = 1 AND digest = 1 AND next_digest_at <= ?"
+                    " ORDER BY next_digest_at LIMIT ?",
+                    (now, limit),
+                ).fetchall()
+                for row in rows:
+                    self._db.execute(
+                        "UPDATE monitors SET next_digest_at = ? WHERE id = ?", (now + DIGEST_PERIOD_S, row["id"])
+                    )
+                self._db.execute("COMMIT")
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+        return [_monitor(r) for r in rows]
+
+    def reports_between(self, mid: str, start: float, end: float) -> list[StoredReport]:
+        """A monitor's reports with start <= created_at < end, oldest first (expired ones included)."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, body, created_at, expires_at, monitor_id FROM reports"
+                " WHERE monitor_id = ? AND created_at >= ? AND created_at < ? ORDER BY created_at",
+                (mid, start, end),
+            ).fetchall()
+        return [_stored(r) for r in rows]
+
+    def report_before(self, mid: str, t: float) -> StoredReport | None:
+        """A monitor's latest report created before t: the baseline a weekly summary compares against."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT id, body, created_at, expires_at, monitor_id FROM reports"
+                " WHERE monitor_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+                (mid, t),
+            ).fetchone()
+        return _stored(row) if row else None
+
     def record_run(self, mid: str, report_id: str | None) -> None:
         """A successful run resets failures; a failed one (report_id None) increments them."""
         with self._lock:
@@ -285,6 +352,16 @@ class Store:
         return [HistoryPoint(r["id"], r["created_at"], r["grade"], r["score"]) for r in rows]
 
 
+def _stored(row: sqlite3.Row) -> StoredReport:
+    return StoredReport(
+        id=row["id"],
+        report=Report.model_validate_json(row["body"]),
+        created_at=row["created_at"],
+        expires_at=row["expires_at"],
+        monitor_id=row["monitor_id"],
+    )
+
+
 def _monitor(row: sqlite3.Row) -> Monitor:
     return Monitor(
         id=row["id"],
@@ -296,4 +373,6 @@ def _monitor(row: sqlite3.Row) -> Monitor:
         next_run_at=row["next_run_at"],
         last_report_id=row["last_report_id"],
         failures=row["failures"],
+        digest=bool(row["digest"]),
+        next_digest_at=row["next_digest_at"],
     )

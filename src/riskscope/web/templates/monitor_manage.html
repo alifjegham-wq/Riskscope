@@ -37,6 +37,18 @@
     </select>
     <button type="submit">Save</button>
   </form>
+  <form method="post" action="/m/{{ monitor.id }}/{{ token }}/digest" class="spaced">
+    {% if monitor.digest %}
+      <p>Weekly summary: <strong>on</strong>{% if monitor.confirmed and monitor.next_digest_at %}
+        <span class="muted">· next around {{ monitor.next_digest_at|datetime }}</span>{% endif %}</p>
+      <button type="submit">Turn off weekly summary</button>
+    {% else %}
+      <p>Weekly summary: <strong>off</strong>. Get one email a week with your grade trend, new and fixed
+        issues, and what to fix next.</p>
+      <input type="hidden" name="enabled" value="true">
+      <button type="submit">Turn on weekly summary</button>
+    {% endif %}
+  </form>
   <form method="post" action="/m/{{ monitor.id }}/{{ token }}/unsubscribe" class="spaced">
     <button type="submit" class="danger">Stop monitoring and delete history</button>
   </form>
