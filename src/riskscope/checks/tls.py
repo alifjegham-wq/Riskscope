@@ -9,6 +9,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+
 from ..models import Category, Finding, Severity
 from ..safety import assert_public_host
 from .base import ScanContext
@@ -22,6 +25,10 @@ class TlsInfo:
     protocol: str | None = None
     not_after: float | None = None  # epoch seconds
     legacy_protocols: list[str] = field(default_factory=list)
+    key_type: str = ""
+    key_bits: int | None = None
+    sig_hash: str = ""  # e.g. "sha256", "sha1"
+    validity_days: int | None = None
 
 
 def _handshake(ip: str, host: str, context: ssl.SSLContext) -> ssl.SSLSocket:
@@ -31,6 +38,17 @@ def _handshake(ip: str, host: str, context: ssl.SSLContext) -> ssl.SSLSocket:
     except BaseException:
         raw.close()
         raise
+
+
+def _fill_cert_info(info: TlsInfo, cert: x509.Certificate) -> None:
+    pub = cert.public_key()
+    if isinstance(pub, rsa.RSAPublicKey):
+        info.key_type, info.key_bits = "RSA", pub.key_size
+    elif isinstance(pub, ec.EllipticCurvePublicKey):
+        info.key_type, info.key_bits = "EC", pub.curve.key_size
+    if cert.signature_hash_algorithm is not None:
+        info.sig_hash = cert.signature_hash_algorithm.name.lower()
+    info.validity_days = (cert.not_valid_after_utc - cert.not_valid_before_utc).days
 
 
 def probe_tls(host: str, ip: str) -> TlsInfo:
@@ -44,6 +62,17 @@ def probe_tls(host: str, ip: str) -> TlsInfo:
                 info.not_after = ssl.cert_time_to_seconds(str(cert["notAfter"]))
     except ssl.SSLCertVerificationError as exc:
         info.verify_error = exc.verify_message or str(exc)
+
+    try:  # parse the served cert regardless of trust, to inspect key/signature/validity
+        no_verify = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        no_verify.check_hostname = False
+        no_verify.verify_mode = ssl.CERT_NONE
+        with _handshake(ip, host, no_verify) as s:
+            der = s.getpeercert(binary_form=True)
+        if der:
+            _fill_cert_info(info, x509.load_der_x509_certificate(der))
+    except (ssl.SSLError, OSError, ValueError):
+        pass
 
     for name, version in (("TLS 1.0", ssl.TLSVersion.TLSv1), ("TLS 1.1", ssl.TLSVersion.TLSv1_1)):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -136,6 +165,46 @@ class TlsCheck:
                         "Apache": "SSLProtocol -all +TLSv1.2 +TLSv1.3",
                     },
                     references=["https://ssl-config.mozilla.org/"],
+                )
+            )
+        if info.key_type == "RSA" and info.key_bits is not None and info.key_bits < 2048:
+            out.append(
+                Finding(
+                    id="tls.weak_key",
+                    title=f"The certificate uses a weak {info.key_bits}-bit RSA key",
+                    severity=Severity.HIGH,
+                    category=Category.TLS,
+                    description="RSA keys under 2048 bits can be broken; browsers reject them.",
+                    evidence=f"{info.key_type} {info.key_bits}-bit",
+                    fix="Reissue the certificate with at least a 2048-bit RSA key (or a 256-bit ECDSA key).",
+                )
+            )
+        if info.sig_hash in ("sha1", "md5"):
+            out.append(
+                Finding(
+                    id="tls.weak_signature",
+                    title=f"The certificate is signed with {info.sig_hash.upper()}",
+                    severity=Severity.HIGH,
+                    category=Category.TLS,
+                    description=f"{info.sig_hash.upper()} signatures are forgeable and distrusted by browsers.",
+                    evidence=f"signature algorithm: {info.sig_hash}",
+                    fix="Reissue the certificate with a SHA-256 (or stronger) signature.",
+                )
+            )
+        if info.validity_days is not None and info.validity_days > 398:
+            out.append(
+                Finding(
+                    id="tls.long_validity",
+                    title=f"The certificate is valid for {info.validity_days} days",
+                    severity=Severity.LOW,
+                    category=Category.TLS,
+                    description=(
+                        "Public certificates must be valid for at most 398 days; a longer-lived one is "
+                        "non-compliant and newer browsers may reject it. A long-lived leaf cert is also a bigger "
+                        "risk if its key is ever stolen."
+                    ),
+                    evidence=f"validity: {info.validity_days} days",
+                    fix="Issue certificates for 398 days or less and automate renewal.",
                 )
             )
         return out

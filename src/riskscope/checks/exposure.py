@@ -40,6 +40,11 @@ class Probe:
     severity: Severity
     why: str
     matches: Callable[[bytes], bool]
+    # Some probes target app endpoints rather than stray files; they carry their own
+    # remediation. When unset, a generic "delete the file / block dotfiles" fix is used.
+    fix: str | None = None
+    snippets: dict[str, str] | None = None
+    references: tuple[str, ...] = ()
 
 
 PROBES: tuple[Probe, ...] = (
@@ -134,6 +139,176 @@ PROBES: tuple[Probe, ...] = (
         "Lists file names in the folder, which can reveal hidden files.",
         _magic(b"\x00\x00\x00\x01Bud1"),
     ),
+    Probe(
+        "/.svn/wc.db",
+        "Subversion repository is downloadable",
+        Severity.CRITICAL,
+        "The .svn working copy is public; attackers can recover your full source code.",
+        _magic(b"SQLite format 3\x00"),
+    ),
+    Probe(
+        "/.hg/requires",
+        "Mercurial repository is downloadable",
+        Severity.HIGH,
+        "The .hg folder is public; source history may be recoverable.",
+        _text(r"revlogv1|dotencode|store|fncache"),
+    ),
+    Probe(
+        "/.git-credentials",
+        "Git credentials file is public",
+        Severity.CRITICAL,
+        "This file stores git usernames and passwords/tokens in plain text.",
+        _text(r"https?://[^:/\s]+:[^@/\s]+@"),
+    ),
+    Probe(
+        "/.env.local",
+        "Environment file (.env.local) is public",
+        Severity.CRITICAL,
+        ".env files usually hold database passwords and API keys.",
+        _text(r"(?m)^[A-Z][A-Z0-9_]{2,}=.+\n[A-Z][A-Z0-9_]{2,}="),
+    ),
+    Probe(
+        "/.env.production",
+        "Environment file (.env.production) is public",
+        Severity.CRITICAL,
+        ".env files usually hold database passwords and API keys.",
+        _text(r"(?m)^[A-Z][A-Z0-9_]{2,}=.+\n[A-Z][A-Z0-9_]{2,}="),
+    ),
+    Probe(
+        "/wp-config.php~",
+        "WordPress config backup is public",
+        Severity.CRITICAL,
+        "Editor backup copies are served as plain text, revealing database credentials and salts.",
+        _text(r"DB_PASSWORD"),
+    ),
+    Probe(
+        "/storage/logs/laravel.log",
+        "Laravel log file is public",
+        Severity.HIGH,
+        "Application logs leak stack traces, file paths and sometimes credentials or tokens.",
+        _text(r"\] (?:local|production|staging)\.(?:ERROR|WARNING|CRITICAL)"),
+    ),
+    Probe(
+        "/.vscode/sftp.json",
+        "VS Code SFTP config (with credentials) is public",
+        Severity.HIGH,
+        "This editor config often contains the deploy server host, username and password or key path.",
+        _text(r'"(?:password|privateKeyPath|host|username)"'),
+    ),
+    Probe(
+        "/docker-compose.yml",
+        "docker-compose.yml is public",
+        Severity.MEDIUM,
+        "Compose files reveal your services and often embed passwords and secrets in environment blocks.",
+        _text(r"(?m)^\s*(?:services|image|environment):"),
+    ),
+    Probe(
+        "/composer.lock",
+        "composer.lock is public",
+        Severity.LOW,
+        "Reveals the exact PHP package versions you run, making it easy to target known vulnerabilities.",
+        _text(r'"(?:packages|content-hash)"'),
+    ),
+    Probe(
+        "/adminer.php",
+        "Adminer database tool is exposed",
+        Severity.MEDIUM,
+        "A public database login tool is a direct target for credential attacks.",
+        lambda b: b"Adminer" in b[:65536] and b"login" in b[:65536].lower(),
+    ),
+    Probe(
+        "/phpmyadmin/",
+        "phpMyAdmin is exposed",
+        Severity.MEDIUM,
+        "A public database admin login is a constant target for brute-force and known-exploit attacks.",
+        lambda b: b"phpMyAdmin" in b[:65536],
+    ),
+    # --- Cloud / CI / infra secrets (OWASP 2025 A02 Security Misconfiguration, A03 Supply Chain) ---
+    Probe(
+        "/.env.bak",
+        "Environment backup file is public",
+        Severity.CRITICAL,
+        ".env backups are served as plain text, revealing database passwords and API keys.",
+        _text(r"(?m)^[A-Z][A-Z0-9_]{2,}=.+\n[A-Z][A-Z0-9_]{2,}="),
+    ),
+    Probe(
+        "/.env.old",
+        "Environment backup file is public",
+        Severity.CRITICAL,
+        ".env backups are served as plain text, revealing database passwords and API keys.",
+        _text(r"(?m)^[A-Z][A-Z0-9_]{2,}=.+\n[A-Z][A-Z0-9_]{2,}="),
+    ),
+    Probe(
+        "/.npmrc",
+        "npm config with auth token is public",
+        Severity.HIGH,
+        "An _authToken in .npmrc lets an attacker publish packages to your registry account.",
+        _text(r"_authToken\s*=|:_password="),
+        fix="Remove /.npmrc from the web root and revoke the exposed npm token now.",
+        references=("https://docs.npmjs.com/revoking-access-tokens",),
+    ),
+    Probe(
+        "/.kube/config",
+        "Kubernetes kubeconfig is public",
+        Severity.CRITICAL,
+        "A kubeconfig hands over cluster credentials — often full admin of your Kubernetes cluster.",
+        _text(r"(?m)^(?:apiVersion|clusters|current-context):"),
+        fix="Remove /.kube/config from the web root and rotate the cluster credentials / client certs.",
+    ),
+    Probe(
+        "/terraform.tfstate",
+        "Terraform state file is public",
+        Severity.HIGH,
+        "Terraform state records your whole infrastructure and stores many secrets (DB passwords, keys) in clear text.",
+        _text(r'"terraform_version"\s*:'),
+        fix="Remove the state file from the web root and move state to a private remote backend. "
+        "Rotate any secrets it contained.",
+        references=("https://developer.hashicorp.com/terraform/language/state/sensitive-data",),
+    ),
+    Probe(
+        "/appsettings.json",
+        "ASP.NET appsettings.json is public",
+        Severity.HIGH,
+        "This config usually holds ConnectionStrings and API keys in clear text.",
+        _text(r'"ConnectionStrings"\s*:'),
+        fix="Block appsettings.json in the server config and move secrets to environment variables or a "
+        "secrets store. Rotate any that leaked.",
+    ),
+    Probe(
+        "/actuator/env",
+        "Spring Boot Actuator /env is public",
+        Severity.HIGH,
+        "The env endpoint dumps configuration and environment variables, often exposing credentials.",
+        _text(r'"(?:propertySources|activeProfiles)"\s*:'),
+        fix="Restrict Spring Boot Actuator: expose only health, and secure the rest "
+        "(management.endpoints.web.exposure.include). Rotate anything that leaked.",
+        references=(
+            "https://docs.spring.io/spring-boot/reference/actuator/endpoints.html#actuator.endpoints.security",
+        ),
+    ),
+    Probe(
+        "/actuator/heapdump",
+        "Spring Boot Actuator heap dump is public",
+        Severity.CRITICAL,
+        "A heap dump is a snapshot of application memory — it contains live credentials, tokens and session data.",
+        _magic(b"JAVA PROFILE"),
+        fix="Disable the heapdump endpoint and never expose Actuator publicly. Rotate any secrets the "
+        "application held in memory.",
+        references=(
+            "https://docs.spring.io/spring-boot/reference/actuator/endpoints.html#actuator.endpoints.security",
+        ),
+    ),
+    Probe(
+        "/@vite/client",
+        "Vite dev server is exposed in production",
+        Severity.HIGH,
+        "A running Vite dev server exposes source files and, via the /@fs/ route (CVE-2026-39364), can "
+        "serve arbitrary files from the host.",
+        _text(r"createHotContext|__vite__|import\.meta\.hot"),
+        fix="Never run the Vite dev server in production. Build with `vite build` and serve the static "
+        "output; keep the dev server bound to localhost.",
+        references=("https://nvd.nist.gov/vuln/detail/CVE-2026-39364",),
+    ),
 )
 
 
@@ -166,14 +341,18 @@ class ExposedFilesCheck:
                 category=Category.EXPOSURE,
                 description=p.why,
                 evidence=f"GET {p.path} -> 200 with matching content",
-                fix=(
+                fix=p.fix
+                or (
                     f"Delete /{p.path.split('/')[1]} from the web root (or block it in the server config). "
                     "If it held secrets, treat them as leaked and rotate them now."
                 ),
-                snippets={
+                snippets=p.snippets
+                if p.snippets is not None
+                else {
                     "nginx": "location ~ /\\.(?!well-known) { deny all; }",
                     "Apache": '<FilesMatch "^\\.">\n  Require all denied\n</FilesMatch>',
                 },
+                references=list(p.references),
             )
 
         results = await asyncio.gather(*(one(p) for p in self.probes))

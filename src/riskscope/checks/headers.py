@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
 from ..models import Category, Finding, Severity
 from .base import ScanContext
@@ -131,6 +132,55 @@ class SecurityHeadersCheck:
                         fix="Replace 'unsafe-inline' with nonces or hashes for the inline scripts you need.",
                     )
                 )
+            if "'unsafe-eval'" in script_src:
+                out.append(
+                    Finding(
+                        id="headers.csp.unsafe_eval",
+                        title="CSP allows eval() in scripts",
+                        severity=Severity.LOW,
+                        category=Category.HEADERS,
+                        description="'unsafe-eval' lets pages run strings as code, which XSS payloads rely on.",
+                        evidence=f"script-src {script_src}",
+                        fix="Remove 'unsafe-eval' and refactor any code that uses eval()/new Function().",
+                    )
+                )
+            if any(src in ("*", "http:", "https:") for src in script_src.split()):
+                out.append(
+                    Finding(
+                        id="headers.csp.wildcard_script",
+                        title="CSP lets scripts load from anywhere",
+                        severity=Severity.MEDIUM,
+                        category=Category.HEADERS,
+                        description=(
+                            "A wildcard (*) or bare http:/https: source in script-src means a script from any "
+                            "site is allowed, which defeats the CSP's XSS protection."
+                        ),
+                        evidence=f"script-src {script_src}",
+                        fix="List the exact origins your scripts come from instead of a wildcard.",
+                    )
+                )
+            if _directive(csp, "object-src") is None and _directive(csp, "default-src") is None:
+                out.append(
+                    Finding(
+                        id="headers.csp.no_object_src",
+                        title="CSP does not restrict plugins (object-src)",
+                        severity=Severity.LOW,
+                        category=Category.HEADERS,
+                        description="Without object-src, Flash/Java-style plugin content can still be embedded.",
+                        fix="Add object-src 'none' to the policy.",
+                    )
+                )
+            if _directive(csp, "base-uri") is None:
+                out.append(
+                    Finding(
+                        id="headers.csp.no_base_uri",
+                        title="CSP does not set base-uri",
+                        severity=Severity.LOW,
+                        category=Category.HEADERS,
+                        description="Without base-uri, an injected <base> tag can redirect every relative URL.",
+                        fix="Add base-uri 'self' (or 'none') to the policy.",
+                    )
+                )
 
         if "x-frame-options" not in h and not _directive(csp, "frame-ancestors"):
             out.append(
@@ -184,6 +234,43 @@ class SecurityHeadersCheck:
                     category=Category.HEADERS,
                     description="Optional hardening: switch off browser features (camera, mic...) you never use.",
                     snippets=_hdr("Permissions-Policy", "camera=(), microphone=(), geolocation=()"),
+                )
+            )
+
+        if "cross-origin-opener-policy" not in h:
+            out.append(
+                Finding(
+                    id="headers.coop.missing",
+                    title="No Cross-Origin-Opener-Policy",
+                    severity=Severity.INFO,
+                    category=Category.HEADERS,
+                    description=(
+                        "Optional hardening: COOP isolates your pages from windows they open or that open "
+                        "them, blocking cross-window attacks (tabnabbing, cross-site leaks)."
+                    ),
+                    fix="Send Cross-Origin-Opener-Policy: same-origin (test popup/OAuth flows first).",
+                    snippets=_hdr("Cross-Origin-Opener-Policy", "same-origin"),
+                    references=[MDN + "Cross-Origin-Opener-Policy"],
+                )
+            )
+
+        deprecated = _deprecated_headers(h)
+        if deprecated:
+            out.append(
+                Finding(
+                    id="headers.deprecated",
+                    title="Deprecated or risky security headers are set",
+                    severity=Severity.LOW,
+                    category=Category.HEADERS,
+                    description=(
+                        "These headers are obsolete and can cause harm: HPKP (Public-Key-Pins) can lock "
+                        "users out of your site, and X-XSS-Protection's filter has itself caused cross-site "
+                        "leak bugs. Modern browsers ignore Expect-CT and X-XSS-Protection."
+                    ),
+                    evidence="; ".join(deprecated),
+                    fix="Remove these headers. Rely on HSTS, a strong Content-Security-Policy, and "
+                    "X-Content-Type-Options instead. If you keep X-XSS-Protection, set it to 0.",
+                    references=[MDN + "X-XSS-Protection"],
                 )
             )
 
@@ -241,6 +328,23 @@ class CorsCheck:
                 references=["https://portswigger.net/web-security/cors"],
             )
         ]
+
+
+def _deprecated_headers(h: Mapping[str, str]) -> list[str]:
+    """Report obsolete / risky security headers that are present.
+
+    X-XSS-Protection is only flagged when it is enabled (a non-zero value); the
+    recommended '0' is fine to keep.
+    """
+    found: list[str] = []
+    for name in ("public-key-pins", "public-key-pins-report-only", "expect-ct"):
+        value = h.get(name)
+        if value:
+            found.append(f"{name}: {value}")
+    xss = h.get("x-xss-protection")
+    if xss and xss.strip().split(";")[0].strip() not in ("", "0"):
+        found.append(f"x-xss-protection: {xss}")
+    return found
 
 
 def _directive(csp: str, name: str) -> str | None:
