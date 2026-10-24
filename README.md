@@ -132,7 +132,7 @@ sent, so you can follow the links locally.
 
 ## Deploying
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/alifjegham-wq/riskscope)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/alifjegham-wq/Riskscope)
 
 The quickest way to put riskscope online is the Render blueprint (`render.yaml`). **[docs/DEPLOY.md](docs/DEPLOY.md)**
 walks through it step by step, from a phone browser if you like, including email setup for monitoring. On a

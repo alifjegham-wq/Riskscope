@@ -24,7 +24,7 @@ Resolver = Callable[[str], Awaitable[list[str]]]
 
 MAX_REDIRECTS = 5
 MAX_BODY_BYTES = 2_000_000
-USER_AGENT = "riskscope/0.1 (+https://github.com/alifjegham-wq/riskscope; free security scanner)"
+USER_AGENT = "riskscope/0.1 (+https://github.com/alifjegham-wq/Riskscope; free security scanner)"
 
 _HOSTNAME = re.compile(r"^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$")
 

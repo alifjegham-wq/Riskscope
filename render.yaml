@@ -1,4 +1,4 @@
-# One-click deploy on Render: https://render.com/deploy?repo=https://github.com/alifjegham-wq/riskscope
+# One-click deploy on Render: https://render.com/deploy?repo=https://github.com/alifjegham-wq/Riskscope
 # See docs/DEPLOY.md for the step-by-step (works from a phone browser).
 services:
   - type: web

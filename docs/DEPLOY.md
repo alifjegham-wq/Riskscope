@@ -17,7 +17,7 @@ browser. No terminal is needed.
 ## Deploy
 
 1. Open this link on your phone:
-   **https://render.com/deploy?repo=https://github.com/alifjegham-wq/riskscope**
+   **https://render.com/deploy?repo=https://github.com/alifjegham-wq/Riskscope**
 2. Sign in with GitHub and allow Render to access the `riskscope` repository.
 3. Render shows the blueprint: one web service called `riskscope` with a disk. Fill in the prompted values:
    - `RISKSCOPE_PUBLIC_BASE_URL`: **leave empty**. riskscope then uses `https://<name>.onrender.com`
