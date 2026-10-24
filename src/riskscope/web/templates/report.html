@@ -16,7 +16,15 @@
   link expires {{ shared.expires_at|datetime }}</p>
 {% endif %}
 <section class="summary card">
-  <div class="grade grade-{{ report.grade }}" aria-label="Grade {{ report.grade }}">{{ report.grade }}</div>
+  <div class="gauge gauge-{{ report.grade }}">
+    <svg viewBox="0 0 120 120" width="112" height="112" aria-hidden="true">
+      <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="10"></circle>
+      <circle cx="60" cy="60" r="50" fill="none" stroke="currentColor" stroke-width="10" stroke-linecap="round"
+        stroke-dasharray="{{ (report.score / 100 * 314.16)|round(1) }} 314.16"></circle>
+    </svg>
+    <div class="score" aria-label="Score {{ report.score }} of 100, grade {{ report.grade }}">
+      <b>{{ report.score }}</b><small>GRADE {{ report.grade }}</small></div>
+  </div>
   <div>
     <h1>{{ report.target }}</h1>
     <p class="risk">Risk level: <strong>{{ report.risk_level }}</strong> · score {{ report.score }}/100</p>
@@ -30,11 +38,16 @@
   </div>
 </section>
 
+<div class="actions">
+  <button type="button" id="print-btn" class="secondary">🖨️ Print / save as PDF</button>
+  {% if report.share_url %}<button type="button" class="secondary copy-btn" data-copy="{{ report.share_url }}">🔗 Copy share link</button>{% endif %}
+</div>
+
 {% if report.findings %}
 <section>
   <h2>What to fix, most urgent first</h2>
   {% for f in report.sorted_findings() %}
-  <details class="finding" {% if f.severity.rank <= 1 %}open{% endif %}>
+  <details class="finding s-{{ f.severity.value }}" {% if f.severity.rank <= 1 %}open{% endif %}>
     <summary><span class="sev sev-{{ f.severity.value }}">{{ f.severity.value }}</span>
       <span class="ftitle">{{ f.title }}</span> <span class="cat">{{ f.category.value }}</span></summary>
     <p>{{ f.description }}</p>

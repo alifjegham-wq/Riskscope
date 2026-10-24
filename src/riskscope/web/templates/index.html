@@ -1,8 +1,14 @@
 {% extends "base.html" %}
+{% set nav = 'scan' %}
 {% block main %}
 <section class="hero">
   <h1>How exposed is your website?</h1>
-  <p>Free security check: get a risk grade and a prioritised list of what to fix, with copy-paste config.</p>
+  <p>A free security check: get a risk grade and a prioritised list of what to fix, with copy-paste config.</p>
+  <div class="pills">
+    <span class="pill">No sign-up</span>
+    <span class="pill">Open source</span>
+    <span class="pill">Results in seconds</span>
+  </div>
 </section>
 
 <section class="card">
@@ -16,15 +22,52 @@
       <button type="submit">Scan</button>
     </div>
     <label class="check"><input type="checkbox" name="deep" value="true">
-      Include active checks (open ports). Requires proving you own the domain.</label>
+      <span>Include active checks (open ports). Requires proving you own the domain.</span></label>
     {% if sharing_enabled %}
     <label class="check"><input type="checkbox" name="share" value="true">
-      Create a shareable link to the report (private link, expires after {{ share_ttl_days }} days, you can delete it).</label>
+      <span>Create a shareable link to the report (private link, expires after {{ share_ttl_days }} days, you can delete it).</span></label>
     {% endif %}
   </form>
-  <p class="muted"><a href="/bulk">Own several sites?</a> Scan them together (each gated behind ownership proof).</p>
-  <p class="muted">Checks HTTPS &amp; certificates, security headers, cookies, CORS, SPF/DMARC email spoofing
-    protection, DNS hardening, subdomain takeover, exposed files (.git, .env, backups) and outdated JavaScript libraries. Enter an <strong>IP address or CIDR block</strong> and riskscope finds the site(s) hosted there (via reverse DNS and TLS certificates) and scans each.</p>
+  <p class="muted"><a href="/bulk">Own several sites?</a> Scan them together (each gated behind ownership proof).
+    Enter an <strong>IP address or CIDR block</strong> and riskscope finds the site(s) hosted there
+    (via reverse DNS and TLS certificates) and scans each.</p>
+</section>
+
+<section>
+  <h2>What riskscope checks</h2>
+  <p class="lead">Every scan runs these, then explains the fix in plain language.</p>
+  <div class="features">
+    <div class="feature">
+      <div class="ic" aria-hidden="true">🔒</div>
+      <h3>HTTPS &amp; certificates</h3>
+      <p>TLS setup, weak keys, weak signatures, and certificates that expire too far out.</p>
+    </div>
+    <div class="feature">
+      <div class="ic" aria-hidden="true">🧾</div>
+      <h3>Security headers</h3>
+      <p>HSTS, Content-Security-Policy, cookies, CORS and clickjacking protection.</p>
+    </div>
+    <div class="feature">
+      <div class="ic" aria-hidden="true">✉️</div>
+      <h3>Email spoofing</h3>
+      <p>SPF and DMARC records that stop attackers sending mail as your domain.</p>
+    </div>
+    <div class="feature">
+      <div class="ic" aria-hidden="true">📂</div>
+      <h3>Exposed files</h3>
+      <p>Leaked <code>.git</code>, <code>.env</code>, backups, admin panels and config dumps.</p>
+    </div>
+    <div class="feature">
+      <div class="ic" aria-hidden="true">🌐</div>
+      <h3>DNS &amp; subdomains</h3>
+      <p>DNS hardening and dangling records that allow subdomain takeover.</p>
+    </div>
+    <div class="feature">
+      <div class="ic" aria-hidden="true">📦</div>
+      <h3>Code &amp; dependencies</h3>
+      <p>Known-vulnerable packages (via OSV.dev) and hard-coded secrets in your source.</p>
+    </div>
+  </div>
 </section>
 
 {% if monitoring_enabled %}
@@ -50,7 +93,7 @@
     </div>
     {% if sharing_enabled %}
     <label class="check"><input type="checkbox" name="share" value="true">
-      Create a shareable link to the report. Secrets stay masked; file names are visible.</label>
+      <span>Create a shareable link to the report. Secrets stay masked; file names are visible.</span></label>
     {% endif %}
   </form>
   <p class="muted">Finds dependencies with known vulnerabilities (npm, PyPI, Go, Packagist, RubyGems, crates.io via
