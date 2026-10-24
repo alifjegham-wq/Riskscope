@@ -46,22 +46,46 @@ On the free plan riskscope runs with `RISKSCOPE_PERSISTENT_STORAGE=false`. Scann
 fully. **Shareable links and monitoring are hidden**, because the free disk is wiped whenever the instance
 restarts or wakes from sleep, and saved links would silently break.
 
-### Upgrading later (paid)
+### Upgrading later: shareable links, asset groups & monitoring (paid)
 
-To get shareable links and monitoring, edit `render.yaml`:
-1. Set `plan: starter`.
-2. Add the `disk:` block shown in its comments.
-3. Set `RISKSCOPE_PERSISTENT_STORAGE` to `"true"`.
+These features save data (reports, monitors, asset groups) and send email, so they need a persistent
+disk — which Render only offers on a paid instance. Two parts: **turn on storage**, then **add email**.
 
-Then add these in Render under **Environment**:
-| Variable | Example |
-|---|---|
-| `RISKSCOPE_SMTP_HOST` | `smtp-relay.brevo.com` |
-| `RISKSCOPE_SMTP_PORT` | `587` |
-| `RISKSCOPE_SMTP_USERNAME` / `RISKSCOPE_SMTP_PASSWORD` | from your provider |
-| `RISKSCOPE_SMTP_FROM` | `riskscope <alerts@yourdomain.com>` |
+#### 1. Turn on persistent storage (unlocks shareable links + saved groups)
 
-Brevo, Resend, Postmark and Mailgun all have free email tiers. Monitoring appears once SMTP is set.
+Edit `render.yaml` (all four are needed — the last one is easy to miss):
+1. `plan: starter`
+2. Add the `disk:` block from its comments (`name: riskscope-data`, `mountPath: /data`, `sizeGB: 1`).
+3. `RISKSCOPE_PERSISTENT_STORAGE: "true"`
+4. `RISKSCOPE_DATABASE_PATH: "/data/riskscope.db"` — **put the database on the disk**, or monitors and
+   groups are still wiped on every restart.
+
+Commit and let Render redeploy. Shareable links and **asset groups** now work. (Scheduled **monitoring**
+still needs email, below.)
+
+#### 2. Add email (unlocks monitoring alerts)
+
+Pick a provider with a free tier — **Brevo**, **Resend**, **Postmark** or **Mailgun** — and create an SMTP
+credential. Then in Render → your service → **Environment**, add:
+
+| Variable | Example | Notes |
+|---|---|---|
+| `RISKSCOPE_SMTP_HOST` | `smtp-relay.brevo.com` | from your provider |
+| `RISKSCOPE_SMTP_PORT` | `587` | 587 = STARTTLS (the default) |
+| `RISKSCOPE_SMTP_USERNAME` | from your provider | |
+| `RISKSCOPE_SMTP_PASSWORD` | from your provider | mark it a **secret** |
+| `RISKSCOPE_SMTP_FROM` | `riskscope <alerts@yourdomain.com>` | a sender your provider allows |
+
+Save; Render redeploys. The **"Keep watching your site"** form and the group **Email monitoring** section
+appear once `RISKSCOPE_SMTP_HOST` is set. Email links use your Render URL automatically (via
+`RENDER_EXTERNAL_URL`), so there's nothing else to configure unless you add a custom domain.
+
+**Test it:** set up a monitor (or a group with an email) for a domain you own, confirm the activation
+email arrives, then click Activate. If no email arrives, check Render's **Logs** for SMTP errors and that
+`RISKSCOPE_SMTP_FROM` is an address your provider is allowed to send from.
+
+> Deliverability tip: many providers only deliver reliably once you verify your sending domain (SPF/DKIM).
+> For a quick test, a provider's own sandbox/sender address is fine; for real alerts, verify your domain.
 
 ### Custom domain (optional)
 
