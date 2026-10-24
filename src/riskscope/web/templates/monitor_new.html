@@ -14,6 +14,9 @@
     <select id="frequency" name="frequency">
       {% for f in frequencies %}<option value="{{ f.value }}" {% if (frequency or 'weekly') == f %}selected{% endif %}>{{ f.value|capitalize }}</option>{% endfor %}
     </select>
+    <label class="check spaced"><input type="checkbox" name="digest" value="true" {% if digest %}checked{% endif %}>
+      Also send me a weekly summary (grade trend, what was found and fixed, top things to fix), even when
+      nothing got worse.</label>
     <p><button type="submit">Start monitoring</button></p>
   </form>
 </section>

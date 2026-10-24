@@ -3,6 +3,10 @@
 We alert only when something got worse (a new medium+ finding, a finding whose
 severity rose, or a lower grade), so people keep reading the emails. The first
 run of a new monitor always sends a "monitoring started" summary.
+
+Owners can also opt into a weekly digest: one email a week with the current
+grade against a week ago, what was found and fixed, and the top open issues,
+even when nothing got worse.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ from dataclasses import dataclass, field
 from .models import Finding, Report, Severity
 from .notify import Email, Mailer
 from .safety import Target, parse_target
-from .store import Monitor, Store
+from .store import DIGEST_PERIOD_S, Monitor, Store
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +30,7 @@ ScanFn = Callable[[Target, bool], Awaitable[Report]]
 ALERT_SEVERITIES = {Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM}
 FAILURES_BEFORE_ALERT = 3
 UNCONFIRMED_TTL_S = 7 * 86_400
+DIGEST_TOP_ISSUES = 5
 _GRADE_ORDER = "ABCDF"
 
 
@@ -103,11 +108,81 @@ def started_email(monitor: Monitor, report: Report, report_url: str, manage_url:
         "We'll only email you again when something gets worse: a new issue, a higher severity, or a lower grade.\n\n"
         f"Manage or stop monitoring: {manage_url}\n"
     )
+    if monitor.digest:
+        body = body.replace(
+            "\n\nManage or stop", "\n\nYou'll also get a weekly summary, starting a week from now.\n\nManage or stop"
+        )
     return Email(
         monitor.email,
         f"[riskscope] Monitoring {monitor.target}: grade {report.grade}",
         body,
         unsubscribe_url=manage_url + "/unsubscribe",
+    )
+
+
+def _trend(old: str | None, new: str) -> str:
+    if old is None:
+        return "(first week of monitoring)"
+    if old == new:
+        return f"(unchanged from {old} a week ago)"
+    better = _GRADE_ORDER.index(new) < _GRADE_ORDER.index(old)
+    return f"({'up' if better else 'down'} from {old} a week ago)"
+
+
+def digest_email(
+    monitor: Monitor, week: list[Report], baseline: Report | None, latest_url: str | None, manage_url: str
+) -> Email:
+    """Weekly summary. `week` is this week's reports, oldest first; `baseline` the last one before it."""
+    unsubscribe = manage_url + "/unsubscribe"
+    if not week:
+        reason = (
+            f" The last {monitor.failures} scan attempts couldn't reach the site."
+            if monitor.failures
+            else " The next scan hasn't run yet."
+        )
+        body = (
+            f"riskscope didn't complete a scan of {monitor.target} this week.{reason}\n\n"
+            f"Manage monitoring or turn off these summaries: {manage_url}\n"
+        )
+        return Email(monitor.email, f"[riskscope] Weekly summary for {monitor.target}: no scans", body, unsubscribe)
+
+    latest = week[-1]
+    changes = diff_reports(baseline, latest) if baseline else Changes(new_grade=latest.grade)
+    parts = [
+        f"Weekly security summary for {monitor.target}",
+        f"Grade {latest.grade}, score {latest.score}/100, {latest.risk_level} risk "
+        f"{_trend(changes.old_grade, latest.grade)}."
+        f"\n{len(week)} scan{'s' if len(week) != 1 else ''} this week.",
+    ]
+    if changes.new:
+        parts.append("New this week:\n" + _lines(changes.new))
+    if changes.worse:
+        parts.append(
+            "Got worse:\n"
+            + "\n".join(
+                f"  - [{prev.value.upper()} -> {f.severity.value.upper()}] {f.title}" for f, prev in changes.worse
+            )
+        )
+    if changes.resolved:
+        parts.append("Fixed this week, nice work:\n" + _lines(changes.resolved))
+    todo = [f for f in latest.sorted_findings() if f.severity is not Severity.INFO]
+    if todo:
+        more = len(todo) - DIGEST_TOP_ISSUES
+        parts.append(
+            "Top things to fix next:\n"
+            + _lines(todo[:DIGEST_TOP_ISSUES])
+            + (f"\n  ... and {more} more in the full report" if more > 0 else "")
+        )
+    else:
+        parts.append("No open issues. Keep it up.")
+    if latest_url:
+        parts.append(f"Latest full report: {latest_url}")
+    parts.append(f"Manage monitoring or turn off these summaries: {manage_url}")
+    return Email(
+        monitor.email,
+        f"[riskscope] Weekly summary for {monitor.target}: grade {latest.grade}",
+        "\n\n".join(parts) + "\n",
+        unsubscribe,
     )
 
 
@@ -175,14 +250,33 @@ class Scheduler:
         if changes.alert:
             await self._send(alert_email(monitor, report, changes, report_url, manage_url))
 
+    async def send_digest(self, monitor: Monitor, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        start = now - DIGEST_PERIOD_S
+        week = await asyncio.to_thread(self.store.reports_between, monitor.id, start, now)
+        baseline = await asyncio.to_thread(self.store.report_before, monitor.id, start)
+        latest_url = f"{self.base_url}/r/{week[-1].id}" if week else None
+        await self._send(
+            digest_email(
+                monitor,
+                [r.report for r in week],
+                baseline.report if baseline else None,
+                latest_url,
+                self.manage_link(monitor),
+            )
+        )
+
     async def tick(self, now: float | None = None) -> int:
-        """Run every due monitor once; returns how many ran."""
-        await asyncio.to_thread(self.store.purge_expired)
-        await asyncio.to_thread(self.store.delete_unconfirmed, UNCONFIRMED_TTL_S)
+        """Run every due monitor once, then send due weekly digests; returns how many monitors ran."""
+        await asyncio.to_thread(self.store.purge_expired, now)
+        await asyncio.to_thread(self.store.delete_unconfirmed, UNCONFIRMED_TTL_S, now)
         due = await asyncio.to_thread(self.store.claim_due, now)
         for monitor in due:
             # Sequential on purpose: gentle on targets and on our own outbound bandwidth.
             await self.run_monitor(monitor)
+        # After the scans, so a digest that falls due with a scan includes it.
+        for monitor in await asyncio.to_thread(self.store.claim_due_digests, now):
+            await self.send_digest(monitor, now)
         return len(due)
 
     async def run_forever(self, interval_s: float) -> None:

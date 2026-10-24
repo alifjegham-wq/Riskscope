@@ -10,6 +10,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Annotated, TypedDict
 
@@ -339,6 +340,7 @@ def create_app(
         target: Annotated[str, Form()],
         email: Annotated[str, Form()],
         frequency: Annotated[Frequency, Form()] = Frequency.WEEKLY,
+        digest: Annotated[bool, Form()] = False,
     ) -> HTMLResponse:
         s = svc(request)
         email = email.strip()
@@ -355,6 +357,7 @@ def create_app(
                 error=error,
                 email=email,
                 frequency=frequency,
+                digest=digest,
                 frequencies=list(Frequency),
                 **verification_ctx(request, parsed),
             )
@@ -375,7 +378,9 @@ def create_app(
         if existing is None:
             if await asyncio.to_thread(s.store.count_monitors_for_email, email) >= s.settings.max_monitors_per_email:
                 return again(f"An email address can monitor at most {s.settings.max_monitors_per_email} sites.")
-            existing = await asyncio.to_thread(s.store.create_monitor, parsed.host, email, frequency)
+            existing = await asyncio.to_thread(
+                partial(s.store.create_monitor, parsed.host, email, frequency, digest=digest)
+            )
         # Same reply whether or not the monitor already existed, so this form can't probe who monitors what.
         if existing.confirmed:
             mail = Email(
@@ -438,6 +443,16 @@ def create_app(
         if monitor is None:
             return gone(request)
         await asyncio.to_thread(svc(request).store.set_frequency, mid, frequency)
+        return RedirectResponse(f"/m/{mid}/{token}", status_code=303)
+
+    @app.post("/m/{mid}/{token}/digest", response_model=None)
+    async def monitor_digest(
+        request: Request, mid: str, token: str, enabled: Annotated[bool, Form()] = False
+    ) -> Response:
+        monitor = await monitor_or_404(request, mid, token)
+        if monitor is None:
+            return gone(request)
+        await asyncio.to_thread(svc(request).store.set_digest, mid, enabled)
         return RedirectResponse(f"/m/{mid}/{token}", status_code=303)
 
     @app.post("/m/{mid}/{token}/unsubscribe", response_class=HTMLResponse)
